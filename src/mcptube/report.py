@@ -225,34 +225,42 @@ Guidelines:
 
     def _build_multi_prompt(self, combined: str, query: str) -> str:
         return f"""You are a report generator. Given transcripts from multiple YouTube videos, 
-produce a comprehensive illustrated cross-video report focused on: {query}
+        produce a comprehensive illustrated cross-video report focused on: {query}
 
-{combined}
+        {combined}
 
-Return ONLY valid JSON with this exact structure:
-{{
-    "title": "Report title",
-    "summary": "2-3 sentence overview synthesizing across videos",
-    "sections": [
+        Return ONLY valid JSON with this exact structure:
         {{
-            "heading": "Section heading",
-            "content": "Synthesized content drawing from multiple videos",
-            "frames": [
-                {{"video_id": "abc123", "timestamp": 123.5, "reason": "Description of visual"}}
-            ]
+            "title": "Report title",
+            "summary": "2-3 sentence overview synthesizing across videos",
+            "sections": [
+                {{
+                    "heading": "Section heading",
+                    "content": "Synthesized content drawing from multiple videos",
+                    "frames": [
+                        {{"video_id": "abc123", "timestamp": 123.5, "reason": "Description of visual"}}
+                    ]
+                }}
+            ],
+            "key_takeaways": ["takeaway 1", "takeaway 2"]
         }}
-    ],
-    "key_takeaways": ["takeaway 1", "takeaway 2"]
-}}
 
-Guidelines:
-- Synthesize themes, agreements, and contradictions across videos
-- Create 3-8 sections organized by theme, NOT by video
-- Content should be deep analysis — NOT raw transcript
-- Select frames from across different videos where visually significant
-- Each frame MUST include the video_id it comes from
-- Include 3-6 key takeaways
-- No markdown in JSON values"""
+        ## Frame Selection Rules (CRITICAL — follow strictly)
+        - Each frame's "video_id" MUST exactly match one of the video IDs provided above (e.g. "=== VIDEO: <id> ===")
+        - Each frame's "timestamp" MUST be a value that appears in the transcript timestamps for THAT specific video
+        - Do NOT invent or estimate timestamps — only use [MM:SS] values you can see in the transcript
+        - Do NOT assign a timestamp from one video to a different video's ID
+        - Cross-check: before including a frame, verify the video_id AND timestamp both exist in the same transcript block
+        - If unsure about a timestamp, omit the frame — fewer accurate frames are better than wrong ones
+
+        ## Content Guidelines
+        - Synthesize themes, agreements, and contradictions across videos
+        - Create 3-8 sections organized by theme, NOT by video
+        - Content should be deep analysis — NOT raw transcript
+        - Select frames from across different videos where visually significant
+        - Each section can have 0, 1, or multiple frames — only where visually meaningful
+        - Include 3-6 key takeaways
+        - No markdown in JSON values"""
 
     def _parse_report(self, raw: str, default_video_id: str | None) -> Report:
         """Parse LLM JSON response into a Report."""

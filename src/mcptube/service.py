@@ -358,6 +358,67 @@ class McpTubeService:
         )
         return report, rendered
 
+    def ask_video(self, video_id: str, question: str) -> str:
+        """Ask a question about a single video.
+
+        Args:
+            video_id: YouTube video ID.
+            question: User's question.
+
+        Returns:
+            Answer string.
+
+        Raises:
+            VideoNotFoundError: If video not in library.
+            RuntimeError: If no LLM configured.
+        """
+        if not self._llm or not self._llm.available:
+            raise RuntimeError("Asking questions requires an LLM. Set an API key.")
+        video = self.get_info(video_id)
+        transcript_text = self._format_transcript(video)
+        return self._llm.answer_question(question, [{
+            "video_id": video.video_id,
+            "title": video.title,
+            "channel": video.channel,
+            "transcript_text": transcript_text,
+        }])
+
+    def ask_videos(self, video_ids: list[str], question: str) -> str:
+        """Ask a question across multiple videos.
+
+        Args:
+            video_ids: List of YouTube video IDs.
+            question: User's question.
+
+        Returns:
+            Answer string.
+
+        Raises:
+            VideoNotFoundError: If any video not found.
+            RuntimeError: If no LLM configured.
+        """
+        if not self._llm or not self._llm.available:
+            raise RuntimeError("Asking questions requires an LLM. Set an API key.")
+        transcripts = []
+        for vid in video_ids:
+            video = self.get_info(vid)
+            transcripts.append({
+                "video_id": video.video_id,
+                "title": video.title,
+                "channel": video.channel,
+                "transcript_text": self._format_transcript(video),
+            })
+        return self._llm.answer_question(question, transcripts)
+
+    @staticmethod
+    def _format_transcript(video) -> str:
+        """Format transcript segments with timestamps."""
+        lines = []
+        for seg in video.transcript:
+            mins, secs = divmod(int(seg.start), 60)
+            lines.append(f"[{mins:02d}:{secs:02d}] {seg.text}")
+        return "\n".join(lines)
+
 
     def resolve_video(self, query: str) -> Video:
         """Smart video resolver — tiered resolution strategy.

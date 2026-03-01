@@ -75,6 +75,35 @@ class LLMClient:
         )
         response = self._complete(prompt)
         return self._parse_tags(response)
+    
+    def answer_question(self, question: str, transcripts: list[dict]) -> str:
+        """Answer a question based on video transcript(s).
+
+        Args:
+            question: User's question.
+            transcripts: List of dicts with keys: video_id, title, channel, transcript_text.
+
+        Returns:
+            Answer string.
+
+        Raises:
+            LLMError: If answering fails.
+        """
+        video_blocks = "\n\n".join(
+            f"=== VIDEO: {t['title']} ({t['video_id']}) by {t['channel']} ===\n{t['transcript_text']}"
+            for t in transcripts
+        )
+
+        prompt = (
+            "You are a video analyst. Answer the following question based ONLY on "
+            "the provided video transcript(s). Cite timestamps [MM:SS] when referencing "
+            "specific moments. If the answer cannot be found in the transcripts, say so.\n\n"
+            f"TRANSCRIPTS:\n{video_blocks}\n\n"
+            f"QUESTION: {question}\n\n"
+            "Provide a clear, well-structured answer."
+        )
+        return self._complete(prompt)
+
 
     def _complete(self, prompt: str, max_tokens: int = 4096) -> str:
         """Send a completion request to the configured LLM."""

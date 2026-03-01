@@ -17,11 +17,104 @@ from mcptube.storage.vectorstore import ChromaVectorStore
 
 mcp = FastMCP(
     name="mcptube",
-    instructions=(
-        "mcptube makes YouTube videos searchable and queryable. "
-        "Use add_video to ingest a YouTube URL, then list_videos, "
-        "get_info, search, and get_frame to explore the library."
-    ),
+    instructions = """
+        mcptube is a YouTube video library and analysis platform. It extracts metadata, 
+        transcripts, and frames from YouTube videos and makes them searchable and queryable.
+
+        ## Tool Categories
+
+        ### Library Management
+        - `add_video(url)` — Ingest a YouTube video. Always use this first before any other operation on a video.
+        - `remove_video(video_id)` — Remove a video from the library.
+        - `list_videos()` — List all videos with metadata. Call this first to see what's available.
+        - `get_info(video_id)` — Get full details including transcript and chapters for a specific video.
+
+        ### Search
+        - `search(query, video_id?, limit)` — Semantic search within a single video's transcript.
+        - `search_library(query, tags?, limit)` — Semantic search across ALL videos in the library.
+
+        ### Frame Extraction
+        - `get_frame(video_id, timestamp)` — Extract a frame at an exact timestamp. Returns an inline image.
+        - `get_frame_by_query(video_id, query)` — Find the best transcript match and extract that frame. Returns an inline image.
+        - `get_frame_data(video_id, timestamp)` — Returns base64-encoded frame. Use ONLY when the user explicitly needs base64 or embed_html. Prefer get_frame for display.
+
+        ### Analysis (Passthrough — you do the analysis)
+        - `classify_video(video_id)` — Returns metadata for YOU to classify. Suggest tags and present them to the user.
+        - `generate_report(video_id, query?)` — Returns transcript + metadata for YOU to write an illustrated report.
+        - `generate_report_from_query(query, tags?)` — Returns multi-video data for YOU to write a cross-video report.
+        - `synthesize(video_ids, topic)` — Returns multi-video data for YOU to synthesize themes.
+        - `ask_video(video_id, question)` — Returns transcript for YOU to answer a question about a single video.
+        - `ask_videos(video_ids, question)` — Returns transcripts for YOU to answer a question across multiple videos.
+
+        ### Discovery
+        - `discover_videos(topic)` — Search YouTube for videos on a topic. Results are NOT in the library — user must `add_video` to ingest them.
+
+        ## CLI Integration (for agents with terminal access)
+
+        If you have terminal/shell access, ALWAYS prefer these CLI commands for report 
+        generation, synthesis, discovery, and classification. They use dedicated LLM prompts 
+        and produce significantly more accurate, deterministic, and faster results than 
+        passthrough tools.
+
+        ### CLI Commands — use these instead of passthrough tools when possible:
+
+        | Task | CLI Command | Instead of tool |
+        |------|------------|-----------------|
+        | Add video | `mcptube add "<url>"` | `add_video` |
+        | List library | `mcptube list` | `list_videos` |
+        | Video details | `mcptube info <id_or_index>` | `get_info` |
+        | Search | `mcptube search "<query>" --video <id>` | `search` |
+        | Extract frame | `mcptube frame <id_or_index> <timestamp>` | `get_frame` |
+        | Frame by query | `mcptube frame-query <id_or_index> "<query>"` | `get_frame_by_query` |
+        | Classify | `mcptube classify <id_or_index>` | `classify_video` |
+        | Single report | `mcptube report <id_or_index> --format html -o report.html` | `generate_report` |
+        | Cross-video report | `mcptube report-query "<topic>" --format html -o report.html` | `generate_report_from_query` |
+        | Discover | `mcptube discover "<topic>"` | `discover_videos` |
+        | Synthesize | `mcptube synthesize-cmd "<topic>" -v <id1> -v <id2> --format html -o synthesis.html` | `synthesize` |
+        | Remove video | `mcptube remove <id_or_index>` | `remove_video` |
+        | Ask single video | `mcptube ask "<question>" -v <id>` | `ask_video` |
+        | Ask multi-video | `mcptube ask "<question>" -v <id1> -v <id2>` | `ask_videos` |
+
+
+        ### CLI Rules:
+        - Always wrap multi-word arguments in double quotes: `mcptube search "neural networks"`
+        - Video references accept: exact ID (`BpibZSMGtdY`), index number (`1`), or substring (`"prompting"`)
+        - Report commands require a BYOK API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY)
+        - When running CLI commands, always show the user the command so they can run it themselves in future
+
+        ## Recommended Workflows
+
+        ### Basic: Add → Search → Frame
+        1. `add_video(url)` or `mcptube add "<url>"` to ingest
+        2. `search(query, video_id)` or `mcptube search "<query>"` to find moments
+        3. `get_frame(video_id, timestamp)` or `mcptube frame <id> <timestamp>` to visualize
+
+        ### Reports (prefer CLI if terminal available)
+        1. `mcptube list` to identify videos
+        2. `mcptube report <id> --format html -o report.html` for single video
+        3. `mcptube report-query "<topic>" --format html -o report.html` for cross-video
+        4. If no terminal: use `generate_report` tool, write the report yourself, and use `get_frame` for illustrations
+
+        ### Cross-Video Synthesis (prefer CLI if terminal available)
+        1. `mcptube list` to identify relevant videos
+        2. `mcptube synthesize-cmd "<topic>" -v <id1> -v <id2> --format html -o synthesis.html`
+        3. If no terminal: use `synthesize` tool and write the analysis yourself
+
+        ### Discovery → Ingest
+        1. `mcptube discover "<topic>"` or `discover_videos(topic)` to find videos
+        2. Present results to user
+        3. `mcptube add "<url>"` or `add_video(url)` for videos the user selects
+
+        ## Important Rules
+        - ALWAYS use mcptube tools or CLI commands for video operations. Do NOT fabricate video IDs, timestamps, or transcript content.
+        - ALWAYS call `list_videos()` or `mcptube list` first if you don't know what videos are in the library.
+        - For frame display: use `get_frame` (returns image) NOT `get_frame_data` (returns large base64) unless explicitly asked.
+        - Frame timestamps MUST come from transcript data returned by tools. Never guess timestamps.
+        - `discover_videos` results are NOT in the library. The user must `add_video` before searching or framing them.
+        - When classifying via passthrough, present your suggested tags and ask the user before saving.
+        - If terminal access is available, prefer CLI commands for report, synthesis, discovery, and classify operations.
+    """
+
 )
 
 _service: McpTubeService | None = None
@@ -204,6 +297,10 @@ def get_frame_by_query(video_id: str, query: str) -> Image:
 def get_frame_data(video_id: str, timestamp: float) -> dict:
     """Extract a frame and return as base64 for embedding in reports.
 
+    WARNING: Base64 responses can be very large (50K+ characters) and may
+    exceed client context limits. Prefer get_frame() for inline display.
+    Only use this when base64/embed_html is explicitly needed.
+
     Args:
         video_id: YouTube video ID.
         timestamp: Time in seconds.
@@ -252,9 +349,31 @@ def classify_video(video_id: str) -> dict:
             "channel": video.channel,
             "description": video.description[:500],
             "current_tags": video.tags,
+            "instructions": "Classify this video into 3-8 topic tags. Then call save_tags(video_id, tags) to persist them.",
         }
     except VideoNotFoundError as e:
         return {"error": str(e)}
+
+@mcp.tool(annotations={"readOnlyHint": False})
+def save_tags(video_id: str, tags: list[str]) -> dict:
+    """Save classification tags for a video.
+
+    After classifying a video (via classify_video passthrough),
+    call this to persist the tags to the library.
+
+    Args:
+        video_id: YouTube video ID.
+        tags: List of classification tags to save.
+    """
+    try:
+        svc = _get_service()
+        video = svc.get_info(video_id)
+        video.tags = tags
+        svc._repo.save(video)
+        return {"status": "saved", "video_id": video_id, "tags": tags}
+    except VideoNotFoundError as e:
+        return {"error": str(e)}
+
 
 @mcp.tool(annotations={"readOnlyHint": True})
 def generate_report(video_id: str, query: str | None = None) -> dict:
@@ -426,6 +545,78 @@ def synthesize(video_ids: list[str], topic: str) -> dict:
     except VideoNotFoundError as e:
         return {"error": str(e)}
 
+@mcp.tool(annotations={"readOnlyHint": True})
+def ask_video(video_id: str, question: str) -> dict:
+    """Ask a question about a single video's content.
+
+    Returns transcript and question for client-side answering.
+    If the server has a BYOK API key, returns the LLM-generated answer directly.
+
+    Args:
+        video_id: YouTube video ID.
+        question: Question to ask about the video.
+    """
+    try:
+        svc = _get_service()
+        video = svc.get_info(video_id)
+        transcript = [
+            {"start": s.start, "end": s.end, "text": s.text}
+            for s in video.transcript
+        ]
+        return {
+            "video_id": video.video_id,
+            "title": video.title,
+            "channel": video.channel,
+            "question": question,
+            "transcript": transcript,
+            "instructions": (
+                "Answer the user's question based ONLY on this transcript. "
+                "Cite timestamps [MM:SS] when referencing specific moments. "
+                "If the answer cannot be found in the transcript, say so."
+            ),
+        }
+    except VideoNotFoundError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+def ask_videos(video_ids: list[str], question: str) -> dict:
+    """Ask a question across multiple videos.
+
+    Returns transcripts and question for client-side answering.
+
+    Args:
+        video_ids: List of YouTube video IDs.
+        question: Question to ask across the videos.
+    """
+    try:
+        svc = _get_service()
+        videos = []
+        for vid in video_ids:
+            video = svc.get_info(vid)
+            videos.append({
+                "video_id": video.video_id,
+                "title": video.title,
+                "channel": video.channel,
+                "transcript": [
+                    {"start": s.start, "end": s.end, "text": s.text}
+                    for s in video.transcript
+                ],
+            })
+        return {
+            "question": question,
+            "videos": videos,
+            "instructions": (
+                "Answer the user's question based ONLY on these transcripts. "
+                "Cite timestamps [MM:SS] and video titles when referencing specific moments. "
+                "Compare and contrast across videos where relevant. "
+                "If the answer cannot be found in the transcripts, say so."
+            ),
+        }
+    except VideoNotFoundError as e:
+        return {"error": str(e)}
+
+
 def _video_summary(video: Video) -> dict:
     """Create a concise summary dict for tool responses (excludes transcript)."""
     return {
@@ -438,9 +629,3 @@ def _video_summary(video: Video) -> dict:
         "chapters": [ch.model_dump() for ch in video.chapters],
         "added_at": video.added_at.isoformat() if video.added_at else None,
     }
-
-
-# def _encode_frame(path) -> str:
-#     """Encode a frame as base64 for inline display in MCP clients."""
-#     with open(path, "rb") as f:
-#         return base64.b64encode(f.read()).decode("utf-8")

@@ -56,6 +56,8 @@ def add(url: str = typer.Argument(..., help="YouTube video URL to ingest.")) -> 
         typer.echo(f"   Channel:  {video.channel}")
         typer.echo(f"   Duration: {video.duration:.0f}s")
         typer.echo(f"   Segments: {len(video.transcript)}")
+        if video.tags:
+            typer.echo(f"   Tags:     {', '.join(video.tags)}")
     except VideoAlreadyExistsError as e:
         typer.echo(f"⚠️  {e}", err=True)
         raise typer.Exit(code=1)
@@ -246,6 +248,25 @@ def discover(
     except RuntimeError as e:
         typer.echo(f"❌ {e}", err=True)
         raise typer.Exit(code=1)
+    
+@app.command()
+def ask(
+    question: str = typer.Argument(..., help="Question to ask about the video(s)."),
+    videos: list[str] = typer.Option(..., "--video", "-v", help="Video ID, index, or text (repeatable)."),
+) -> None:
+    """Ask a question about one or more videos using LLM."""
+    svc = _get_service()
+    try:
+        resolved_ids = [_resolve_or_exit(svc, v).video_id for v in videos]
+        if len(resolved_ids) == 1:
+            answer = svc.ask_video(resolved_ids[0], question)
+        else:
+            answer = svc.ask_videos(resolved_ids, question)
+        typer.echo(answer)
+    except (RuntimeError, Exception) as e:
+        typer.echo(f"❌ {e}", err=True)
+        raise typer.Exit(code=1)
+
 
 @app.command()
 def synthesize_cmd(
