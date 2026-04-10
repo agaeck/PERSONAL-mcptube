@@ -306,7 +306,6 @@ mcptube wiki toc
 > 💡 **Always wrap multi-word arguments in double quotes.**
 
 ---
-
 ## 📖 CLI Reference
 
 ### Library Management
@@ -316,51 +315,74 @@ mcptube wiki toc
 | `mcptube add "<url>"` | Ingest video + build wiki (full analysis) | `mcptube add "https://youtu.be/dQw4w9WgXcQ"` |
 | `mcptube add "<url>" --text-only` | Ingest without vision processing | `mcptube add "https://youtu.be/abc" --text-only` |
 | `mcptube list` | List all videos with tags | `mcptube list` |
-| `mcptube info <query>` | Show full video details | `mcptube info 1` |
+| `mcptube info <query>` | Show full video details (transcript, chapters) | `mcptube info 1` |
 | `mcptube remove <query>` | Remove video + clean wiki references | `mcptube remove 1` |
+
+> `<query>` can be a video index number, video ID, or partial title.
+
+---
 
 ### Wiki Knowledge Base
 
 | Command | Description | Example |
 |---------|-------------|---------|
 | `mcptube wiki list` | Browse all wiki pages | `mcptube wiki list` |
-| `mcptube wiki list --type entity` | Filter by type | `mcptube wiki list --type concept` |
-| `mcptube wiki show <slug>` | Read a specific wiki page | `mcptube wiki show "entity-openai"` |
-| `mcptube wiki search "<query>"` | Full-text search | `mcptube wiki search "attention"` |
-| `mcptube wiki toc` | Table of contents | `mcptube wiki toc` |
-| `mcptube wiki history <slug>` | Version history | `mcptube wiki history "topic-ml"` |
-| `mcptube wiki export` | Export as markdown or HTML | `mcptube wiki export --format html -o wiki.html` |
+| `mcptube wiki list --type <type>` | Filter by type: `video`, `entity`, `topic`, `concept` | `mcptube wiki list --type concept` |
+| `mcptube wiki list --tag <tag>` | Filter by tag | `mcptube wiki list --tag AI` |
+| `mcptube wiki show <slug>` | Read a specific wiki page in full | `mcptube wiki show "entity-openai"` |
+| `mcptube wiki search "<query>"` | Full-text search across all wiki pages | `mcptube wiki search "attention"` |
+| `mcptube wiki toc` | Table of contents (all pages, compact) | `mcptube wiki toc` |
+| `mcptube wiki history <slug>` | Version history for a wiki page | `mcptube wiki history "topic-ml"` |
+| `mcptube wiki export` | Export all pages as markdown (default) | `mcptube wiki export -o wiki_export/` |
+| `mcptube wiki export --format html` | Export all pages as single HTML file | `mcptube wiki export --format html -o wiki.html` |
+| `mcptube wiki export --page <slug>` | Export a single page | `mcptube wiki export --page "entity-openai" -o openai.md` |
+
+---
 
 ### Search & Ask
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `mcptube search "<query>"` | Search wiki via FTS5 | `mcptube search "transformers"` |
-| `mcptube ask "<question>"` | Agentic Q&A over wiki | `mcptube ask "What is self-attention?"` |
+| `mcptube search "<query>"` | Full-text search, returns page list | `mcptube search "transformers"` |
+| `mcptube ask "<question>"` | Agentic Q&A over wiki (BYOK) | `mcptube ask "What is self-attention?"` |
+
+---
 
 ### Frames
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `mcptube frame <video> <timestamp>` | Extract frame at timestamp | `mcptube frame 1 30` |
-| `mcptube frame-query <video> "<query>"` | Extract frame by transcript match | `mcptube frame-query 1 "key moment"` |
+| `mcptube frame <query> <timestamp>` | Extract frame at exact timestamp (seconds) | `mcptube frame 1 30.5` |
+| `mcptube frame-query <query> "<description>"` | Extract frame by transcript match | `mcptube frame-query 1 "when they show the diagram"` |
+
+---
 
 ### Analysis & Reports (BYOK)
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `mcptube classify <video>` | LLM classification/tagging | `mcptube classify 1` |
-| `mcptube report <video> [--format html] [-o file]` | Single-video report | `mcptube report 1 -o report.html` |
-| `mcptube report-query "<topic>" [--format html] [-o file]` | Cross-video report | `mcptube report-query "AI" -o report.html` |
-| `mcptube discover "<topic>"` | YouTube search + clustering | `mcptube discover "prompt engineering"` |
-| `mcptube synthesize-cmd "<topic>" -v <id1> -v <id2>` | Cross-video synthesis | `mcptube synthesize-cmd "AI" -v id1 -v id2` |
+| `mcptube classify <query>` | LLM classify + tag a video | `mcptube classify 1` |
+| `mcptube report <query>` | Generate illustrated report for one video | `mcptube report 1` |
+| `mcptube report <query> --focus "<topic>"` | Guide report with a focus query | `mcptube report 1 --focus "RLHF"` |
+| `mcptube report <query> --format html -o <file>` | Save report as HTML | `mcptube report 1 --format html -o report.html` |
+| `mcptube report-query "<topic>"` | Cross-video report on a topic | `mcptube report-query "scaling laws"` |
+| `mcptube report-query "<topic>" --tag <tag>` | Cross-video report filtered by tag | `mcptube report-query "AI" --tag research` |
+| `mcptube report-query "<topic>" -o <file>` | Save cross-video report | `mcptube report-query "AI" --format html -o report.html` |
+| `mcptube synthesize-cmd "<topic>" -v <id> -v <id>` | Cross-video theme synthesis | `mcptube synthesize-cmd "RLHF" -v id1 -v id2` |
+| `mcptube synthesize-cmd "<topic>" -v <id> --format html -o <file>` | Save synthesis as HTML | `mcptube synthesize-cmd "AI" -v id1 --format html -o out.html` |
+| `mcptube discover "<topic>"` | Search YouTube, cluster results (no ingest) | `mcptube discover "prompt engineering"` |
+
+---
 
 ### Server
 
 | Command | Description |
 |---------|-------------|
-| `mcptube serve` | Start MCP server (HTTP) |
-| `mcptube serve --stdio` | Start MCP server (stdio) |
+| `mcptube serve` | Start MCP server over HTTP (default `127.0.0.1:9093`) |
+| `mcptube serve --stdio` | Start MCP server over stdio (for Claude Desktop) |
+| `mcptube serve --host <host> --port <port>` | Custom host/port |
+| `mcptube serve --reload` | Hot-reload mode for development |
+
 
 ---
 
