@@ -16,7 +16,7 @@ from mcptube.wiki.models import WikiPageBase, WikiPageType
 
 from mcptube.ingestion.scene_frames import SceneFrameError, SceneFrameExtractor
 from mcptube.ingestion.vision import VisionDescriber
-
+from mcptube.wiki.models import VideoPage
 
 
 logger = logging.getLogger(__name__)
@@ -416,6 +416,16 @@ class McpTubeService:
                 for r in page.video_references:
                     if r.video_id not in video_ids:
                         video_ids.append(r.video_id)
+
+        from mcptube.wiki.models import VideoPage
+
+        # Collect key frames from wiki VideoPages
+        wiki_frames = {}
+        for vid in video_ids:
+            page = self._wiki.get_page(f"video-{vid}")
+            if isinstance(page, VideoPage) and page.key_frames:
+                wiki_frames[vid] = page.key_frames
+
 
         if not video_ids:
             raise VideoNotFoundError(f"No matching content for: {query}")

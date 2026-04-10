@@ -81,8 +81,9 @@ class ReportBuilder:
         return report
 
     def generate_multi(
-        self, videos: list[Video], query: str
+        self, videos: list[Video], query: str, wiki_frames: dict | None = None
     ) -> Report:
+
         """Generate an illustrated report across multiple videos.
 
         Args:
@@ -104,7 +105,8 @@ class ReportBuilder:
             )
 
         combined = "\n\n".join(video_blocks)
-        prompt = self._build_multi_prompt(combined, query)
+        prompt = self._build_multi_prompt(combined, query, wiki_frames=wiki_frames)
+
         raw = self._llm._complete(prompt, max_tokens=16000)
 
         # For multi-video, pass None — video_id comes from LLM response per frame
@@ -190,44 +192,54 @@ class ReportBuilder:
     def _build_single_prompt(
         self, metadata: str, transcript: str, query: str | None
     ) -> str:
-        focus = f"\nFocus the report on: {query}" if query else ""
-        return f"""You are a report generator. Given a YouTube video transcript and metadata, 
-produce a comprehensive illustrated report.{focus}
+                focus = f"\nFocus the report on: {query}" if query else ""
+                return f"""You are a report generator. Given a YouTube video transcript and metadata, 
+        produce a comprehensive illustrated report.{focus}
 
-{metadata}
+        {metadata}
 
-TRANSCRIPT:
-{transcript}
+        TRANSCRIPT:
+        {transcript}
 
-Return ONLY valid JSON with this exact structure:
-{{
-    "title": "Report title",
-    "summary": "2-3 sentence overview",
-    "sections": [
+        Return ONLY valid JSON with this exact structure:
         {{
-            "heading": "Section heading",
-            "content": "Detailed content (multiple paragraphs, in-depth explanation, not raw transcript)",
-            "frames": [
-                {{"timestamp": 123.5, "reason": "Brief description of what's shown on screen"}}
-            ]
+            "title": "Report title",
+            "summary": "2-3 sentence overview",
+            "sections": [
+                {{
+                    "heading": "Section heading",
+                    "content": "Detailed content (multiple paragraphs, in-depth explanation, not raw transcript)",
+                    "frames": [
+                        {{"timestamp": 123.5, "reason": "Brief description of what's shown on screen"}}
+                    ]
+                }}
+            ],
+            "key_takeaways": ["takeaway 1", "takeaway 2"]
         }}
-    ],
-    "key_takeaways": ["takeaway 1", "takeaway 2"]
-}}
 
-Guidelines:
-- Create 3-8 sections based on the content structure
-- Content should be deep, enriched explanations — NOT raw transcript
-- Select frames at moments with visual significance (slides, diagrams, code, demos)
-- Each section can have 0, 1, or multiple frames — only where visually meaningful
-- Include 3-6 key takeaways
-- No markdown in JSON values"""
+        Guidelines:
+        - Create 3-8 sections based on the content structure
+        - Content should be deep, enriched explanations — NOT raw transcript
+        - Select frames at moments with visual significance (slides, diagrams, code, demos)
+        - Each section can have 0, 1, or multiple frames — only where visually meaningful
+        - Include 3-6 key takeaways
+        - No markdown in JSON values"""
 
-    def _build_multi_prompt(self, combined: str, query: str) -> str:
-        return f"""You are a report generator. Given transcripts from multiple YouTube videos, 
+    def _build_multi_prompt(self, combined: str, query: str, wiki_frames: dict | None = None) -> str:
+            frames_block = ""
+            if wiki_frames:
+                lines = ["## Available Key Frames (use ONLY these timestamps)"]
+                for vid_id, frames in wiki_frames.items():
+                    for kf in frames:
+                        lines.append(f"- video_id: {vid_id} | timestamp: {kf.timestamp} | {kf.description}")
+                frames_block = "\n".join(lines)
+
+            return f"""You are a report generator. Given transcripts from multiple YouTube videos, 
         produce a comprehensive illustrated cross-video report focused on: {query}
 
         {combined}
+
+        {frames_block}
 
         Return ONLY valid JSON with this exact structure:
         {{
@@ -246,11 +258,10 @@ Guidelines:
         }}
 
         ## Frame Selection Rules (CRITICAL — follow strictly)
-        - Each frame's "video_id" MUST exactly match one of the video IDs provided above (e.g. "=== VIDEO: <id> ===")
-        - Each frame's "timestamp" MUST be a value that appears in the transcript timestamps for THAT specific video
-        - Do NOT invent or estimate timestamps — only use [MM:SS] values you can see in the transcript
+        - If "Available Key Frames" are listed above, ONLY use timestamps from that list
+        - Do NOT invent or estimate timestamps — only use values from the key frames list or transcript [MM:SS] values
+        - Each frame's "video_id" MUST exactly match one of the video IDs provided
         - Do NOT assign a timestamp from one video to a different video's ID
-        - Cross-check: before including a frame, verify the video_id AND timestamp both exist in the same transcript block
         - If unsure about a timestamp, omit the frame — fewer accurate frames are better than wrong ones
 
         ## Content Guidelines
@@ -261,6 +272,9 @@ Guidelines:
         - Each section can have 0, 1, or multiple frames — only where visually meaningful
         - Include 3-6 key takeaways
         - No markdown in JSON values"""
+
+
+                
 
     def _parse_report(self, raw: str, default_video_id: str | None) -> Report:
         """Parse LLM JSON response into a Report."""
