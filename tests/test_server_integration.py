@@ -14,7 +14,7 @@ from mcptube.storage.vectorstore import ChromaVectorStore
 def server_service(sample_video):
     """Patch the server's _get_service to use in-memory backends."""
     repo = SQLiteVideoRepository(":memory:")
-    store = ChromaVectorStore(":memory:")
+    #store = ChromaVectorStore(":memory:")
 
     from mcptube.ingestion.youtube import YouTubeExtractor
     extractor = YouTubeExtractor()
@@ -23,18 +23,35 @@ def server_service(sample_video):
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             from mcptube.llm import LLMClient
             with patch("mcptube.llm.litellm.completion") as mock_comp:
-                mock_resp = MagicMock()
-                mock_resp.choices = [MagicMock()]
-                mock_resp.choices[0].message.content = '["AI", "Tutorial"]'
-                mock_comp.return_value = mock_resp
+                SAMPLE_WIKI = '{"video_summary": "A guide to ML.", "key_timestamps": {"00:00": "Intro"}, "entities": [{"name": "ML", "category": "tool", "context": "Covers ML.", "timestamps": ["00:00"]}], "topics": [{"name": "Neural Networks", "content": "Intro to NNs.", "timestamps": ["00:00"], "tags": ["AI"]}], "concepts": [{"name": "Backprop", "content": "Training method.", "timestamps": ["00:00"], "tags": ["ML"]}]}'
+                SAMPLE_CLASSIFY = '["AI", "Tutorial"]'
+                responses = [SAMPLE_CLASSIFY, SAMPLE_WIKI]
+                call_count = {"i": 0}
+                def pick_response(*args, **kwargs):
+                    idx = min(call_count["i"], len(responses) - 1)
+                    call_count["i"] += 1
+                    resp = MagicMock()
+                    resp.choices = [MagicMock()]
+                    resp.choices[0].message.content = responses[idx]
+                    return resp
+                mock_comp.side_effect = pick_response
+
 
                 from mcptube.service import McpTubeService
+                from mcptube.wiki.engine import WikiEngine
+                from mcptube.wiki.storage import FileWikiRepository
+                import tempfile, pathlib
+                wiki_dir = pathlib.Path(tempfile.mkdtemp()) / "wiki"
+                wiki_repo = FileWikiRepository(wiki_dir=wiki_dir, db_path=":memory:")
+                wiki_engine = WikiEngine(repo=wiki_repo, llm=LLMClient())
+
                 svc = McpTubeService(
                     repository=repo,
                     extractor=extractor,
-                    vectorstore=store,
                     llm_client=LLMClient(),
+                    wiki_engine=wiki_engine,
                 )
+
                 import mcptube.server as server_mod
                 with patch.object(server_mod, "_service", svc):
                     with patch.object(server_mod, "_get_service", return_value=svc):
@@ -56,11 +73,13 @@ class TestMCPTools:
         assert result[0]["video_id"] == "dQw4w9WgXcQ"
 
     def test_search_tool(self, server_service):
-        from mcptube.server import add_video, search
+        from mcptube.server import add_video, wiki_search
+
         add_video("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-        results = search("neural networks")
+        results = wiki_search("neural networks")
         assert len(results) > 0
-        assert "text" in results[0]
+        assert "slug" in results[0]
+
 
     def test_get_frame_tool(self, server_service, mock_frames):
         from mcptube.server import add_video, get_frame

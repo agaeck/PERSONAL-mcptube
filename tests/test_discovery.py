@@ -19,6 +19,8 @@ class TestVideoDiscovery:
         ]
 
     def test_discover_returns_clusters(self, mock_llm):
+        mock_llm._mock_completion.side_effect = None
+        
         mock_llm._mock_completion.return_value.choices[0].message.content = json.dumps({
             "clusters": {
                 "Tutorials": ["vid1", "vid3"],
@@ -55,6 +57,7 @@ class TestVideoDiscovery:
         assert results[0].video_id == "vid1"
 
     def test_filter_and_cluster(self, mock_llm):
+        mock_llm._mock_completion.side_effect = None
         mock_llm._mock_completion.return_value.choices[0].message.content = json.dumps({
             "clusters": {"Group A": ["vid1"]}
         })

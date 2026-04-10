@@ -11,6 +11,11 @@ from mcptube.models import Video
 from mcptube.storage.sqlite import SQLiteVideoRepository
 from mcptube.storage.vectorstore import ChromaVectorStore
 
+from mcptube.wiki.engine import WikiEngine
+from mcptube.wiki.storage import FileWikiRepository
+import tempfile, pathlib
+
+
 
 runner = CliRunner()
 
@@ -19,7 +24,7 @@ runner = CliRunner()
 def mock_service(sample_video):
     """Patch _get_service to return a service with in-memory backends."""
     repo = SQLiteVideoRepository(":memory:")
-    store = ChromaVectorStore(":memory:")
+    #store = ChromaVectorStore(":memory:")
 
     from mcptube.ingestion.youtube import YouTubeExtractor
     extractor = YouTubeExtractor()
@@ -28,17 +33,30 @@ def mock_service(sample_video):
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
             from mcptube.llm import LLMClient
             with patch("mcptube.llm.litellm.completion") as mock_comp:
-                mock_resp = MagicMock()
-                mock_resp.choices = [MagicMock()]
-                mock_resp.choices[0].message.content = '["AI", "Tutorial"]'
-                mock_comp.return_value = mock_resp
+                 
+                SAMPLE_WIKI = '{"video_summary": "A guide to ML.", "key_timestamps": {"00:00": "Intro"}, "entities": [], "topics": [{"name": "Neural Networks", "content": "Intro to NNs.", "timestamps": ["00:00"], "tags": ["AI"]}], "concepts": []}'
+                SAMPLE_CLASSIFY = '["AI", "Tutorial"]'
+                responses = [SAMPLE_CLASSIFY, SAMPLE_WIKI]
+                call_count = {"i": 0}
+                def pick_response(*args, **kwargs):
+                    idx = min(call_count["i"], len(responses) - 1)
+                    call_count["i"] += 1
+                    resp = MagicMock()
+                    resp.choices = [MagicMock()]
+                    resp.choices[0].message.content = responses[idx]
+                    return resp
+                mock_comp.side_effect = pick_response
+
 
                 from mcptube.service import McpTubeService
+                wiki_dir = pathlib.Path(tempfile.mkdtemp()) / "wiki"
+                wiki_repo = FileWikiRepository(wiki_dir=wiki_dir, db_path=":memory:")
+                wiki_engine = WikiEngine(repo=wiki_repo, llm=LLMClient())
                 svc = McpTubeService(
                     repository=repo,
                     extractor=extractor,
-                    vectorstore=store,
                     llm_client=LLMClient(),
+                    wiki_engine=wiki_engine,
                 )
                 with patch("mcptube.cli._get_service", return_value=svc):
                     yield svc

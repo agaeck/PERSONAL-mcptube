@@ -57,15 +57,16 @@ class TestInit:
         d = VisionDescriber(mock_llm)
         assert "anthropic" in d._model or "claude" in d._model
 
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=False)
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key", "ANTHROPIC_API_KEY": ""}, clear=False)
     def test_detects_openai(self, mock_llm):
         d = VisionDescriber(mock_llm)
         assert "gpt" in d._model
 
-    @patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key"}, clear=False)
+    @patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key", "ANTHROPIC_API_KEY": "", "OPENAI_API_KEY": ""}, clear=False)
     def test_detects_google(self, mock_llm):
         d = VisionDescriber(mock_llm)
         assert "gemini" in d._model
+
 
 
 class TestDescribeFrames:

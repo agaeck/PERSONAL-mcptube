@@ -34,39 +34,43 @@ def _report_json(*, title="Test Report", with_frames=False, video_id=None):
     })
 
 
+def _set_llm_response(mock_llm, content):
+    """Helper to override side_effect and set a fixed return value."""
+    mock_llm._mock_completion.side_effect = None
+    mock_llm._mock_completion.return_value.choices[0].message.content = content
+
+
 class TestGenerateSingle:
     def test_returns_report(self, report_builder, sample_video, mock_llm):
-        mock_llm._mock_completion.return_value.choices[0].message.content = _report_json()
+        _set_llm_response(mock_llm, _report_json())
         report = report_builder.generate_single(sample_video)
         assert report.title == "Test Report"
         assert len(report.sections) == 1
         assert len(report.key_takeaways) == 2
 
     def test_with_query(self, report_builder, sample_video, mock_llm):
-        mock_llm._mock_completion.return_value.choices[0].message.content = _report_json()
+        _set_llm_response(mock_llm, _report_json())
         report = report_builder.generate_single(sample_video, query="neural networks")
         assert report.title == "Test Report"
 
 
 class TestGenerateMulti:
     def test_returns_report(self, report_builder, sample_video, mock_llm):
-        mock_llm._mock_completion.return_value.choices[0].message.content = _report_json(
-            with_frames=True, video_id=sample_video.video_id
-        )
+        _set_llm_response(mock_llm, _report_json(with_frames=True, video_id=sample_video.video_id))
         report = report_builder.generate_multi([sample_video], "ML overview")
         assert report.title == "Test Report"
 
 
 class TestRender:
     def test_to_markdown(self, report_builder, sample_video, mock_llm):
-        mock_llm._mock_completion.return_value.choices[0].message.content = _report_json()
+        _set_llm_response(mock_llm, _report_json())
         report = report_builder.generate_single(sample_video)
         md = report_builder.to_markdown(report)
         assert "# Test Report" in md
         assert "Takeaway 1" in md
 
     def test_to_html(self, report_builder, sample_video, mock_llm):
-        mock_llm._mock_completion.return_value.choices[0].message.content = _report_json()
+        _set_llm_response(mock_llm, _report_json())
         report = report_builder.generate_single(sample_video)
         html = report_builder.to_html(report)
         assert "<h1>Test Report</h1>" in html
@@ -79,9 +83,7 @@ class TestFrameExtraction:
         failing_frames = FrameExtractor()
         with patch.object(failing_frames, "extract_frame", side_effect=FrameExtractionError("fail")):
             builder = ReportBuilder(llm=mock_llm, frame_extractor=failing_frames)
-            mock_llm._mock_completion.return_value.choices[0].message.content = _report_json(
-                with_frames=True, video_id=sample_video.video_id
-            )
+            _set_llm_response(mock_llm, _report_json(with_frames=True, video_id=sample_video.video_id))
             report = builder.generate_single(sample_video)
             assert report.sections[0].frames[0].path is None
 

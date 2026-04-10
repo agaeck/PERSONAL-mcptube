@@ -1,4 +1,3 @@
-# tests/conftest.py
 """Shared fixtures for mcptube tests."""
 
 import pytest
@@ -9,6 +8,17 @@ from unittest.mock import MagicMock, patch
 from mcptube.models import Chapter, TranscriptSegment, Video
 from mcptube.storage.sqlite import SQLiteVideoRepository
 from mcptube.storage.vectorstore import ChromaVectorStore
+
+
+SAMPLE_WIKI_EXTRACTION = """{
+    "video_summary": "A guide to ML concepts including neural networks.",
+    "key_timestamps": {"00:00": "Introduction", "00:10": "Neural Networks", "00:21": "Outro"},
+    "entities": [{"name": "TechChannel", "category": "organization", "context": "The channel presenting the video.", "timestamps": ["00:00"]}],
+    "topics": [{"name": "Neural Networks", "content": "Introduction to neural network layers and neurons.", "timestamps": ["00:10"], "tags": ["AI", "ML"]}],
+    "concepts": [{"name": "Backpropagation", "content": "Training method for neural networks.", "timestamps": ["00:10"], "tags": ["ML"]}]
+}"""
+
+SAMPLE_CLASSIFY = '["AI", "Tutorial", "Machine Learning"]'
 
 
 @pytest.fixture
@@ -53,7 +63,9 @@ def sqlite_repo(tmp_path):
 @pytest.fixture
 def chroma_store():
     """ChromaVectorStore backed by in-memory ChromaDB."""
-    return ChromaVectorStore(":memory:")
+    store = ChromaVectorStore(":memory:")
+    yield store
+    store._client.delete_collection(store._COLLECTION_NAME)
 
 
 @pytest.fixture
@@ -69,26 +81,34 @@ def mock_extractor(sample_video):
 
 @pytest.fixture
 def mock_llm():
-    """LLMClient with mocked litellm.completion."""
+    """LLMClient with mocked litellm.completion.
+
+    Returns wiki extraction JSON on the first call,
+    then classification JSON on subsequent calls.
+    """
     from mcptube.llm import LLMClient
 
+    #
+    # responses = [SAMPLE_WIKI_EXTRACTION, SAMPLE_CLASSIFY]
+    responses = [SAMPLE_CLASSIFY, SAMPLE_WIKI_EXTRACTION]
+
+    call_count = {"i": 0}
+
+    def pick_response(*args, **kwargs):
+        idx = min(call_count["i"], len(responses) - 1)
+        call_count["i"] += 1
+        resp = MagicMock()
+        resp.choices = [MagicMock()]
+        resp.choices[0].message.content = responses[idx]
+        return resp
+
     with patch("mcptube.llm.litellm.completion") as mock_completion:
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '["AI", "Tutorial", "Machine Learning"]'
-        mock_completion.return_value = mock_response
+        mock_completion.side_effect = pick_response
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key-123"}):
             client = LLMClient()
             client._mock_completion = mock_completion
             yield client
-
-@pytest.fixture
-def chroma_store():
-    """ChromaVectorStore backed by in-memory ChromaDB."""
-    store = ChromaVectorStore(":memory:")
-    yield store
-    store._client.delete_collection(store._COLLECTION_NAME)
 
 
 @pytest.fixture
@@ -107,14 +127,19 @@ def mock_frames(tmp_path):
 
 
 @pytest.fixture
-def service(sqlite_repo, chroma_store, mock_extractor, mock_frames, mock_llm):
+def service(sqlite_repo, mock_extractor, mock_frames, mock_llm, tmp_path):
     """Fully wired McpTubeService with all mocked dependencies."""
     from mcptube.service import McpTubeService
+    from mcptube.wiki.engine import WikiEngine
+    from mcptube.wiki.storage import FileWikiRepository
+
+    wiki_repo = FileWikiRepository(wiki_dir=tmp_path / "wiki", db_path=":memory:")
+    wiki_engine = WikiEngine(repo=wiki_repo, llm=mock_llm)
 
     return McpTubeService(
         repository=sqlite_repo,
         extractor=mock_extractor,
-        vectorstore=chroma_store,
         frame_extractor=mock_frames,
         llm_client=mock_llm,
+        wiki_engine=wiki_engine,
     )

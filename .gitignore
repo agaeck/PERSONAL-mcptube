@@ -39,3 +39,6 @@ htmlcov/
 
 dist/
 *.egg-info/
+
+*.log
+*.txt
