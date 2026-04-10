@@ -40,6 +40,195 @@ Traditional video tools re-discover knowledge from scratch on every query. mcptu
 
 ---
 
+## 🏗️ Technical Architecture
+
+mcptube-vision is built around a core insight: **video knowledge should compound, not be re-discovered**. Every architectural decision flows from this principle.
+
+### System Overview
+
+```mermaid
+flowchart TD
+    YT[YouTube URL] --> EXT[YouTubeExtractor\ntranscript + metadata]
+    EXT --> FRAMES[SceneFrameExtractor\nffmpeg scene-change detection]
+    FRAMES --> VISION[VisionDescriber\nLLM vision model]
+    VISION --> WIKI_EXT[WikiExtractor\nLLM knowledge extraction]
+    EXT --> WIKI_EXT
+    WIKI_EXT --> WIKI_ENG[WikiEngine\nmerge + update]
+    WIKI_ENG --> FILE[FileWikiRepository\nJSON pages on disk]
+    WIKI_ENG --> FTS[SQLite FTS5\nsearch index]
+    FILE --> AGENT[Ask Agent\nFTS5 → LLM reasoning]
+    FTS --> AGENT
+    FILE --> CLI[CLI / MCP Server]
+    FTS --> CLI
+
+    subgraph Ingestion Pipeline
+        EXT
+        FRAMES
+        VISION
+        WIKI_EXT
+    end
+
+    subgraph Knowledge Store
+        WIKI_ENG
+        FILE
+        FTS
+    end
+
+    subgraph Retrieval
+        AGENT
+    end
+```
+
+---
+
+### Ingestion Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI
+    participant YouTubeExtractor
+    participant SceneFrameExtractor
+    participant VisionDescriber
+    participant WikiExtractor
+    participant WikiEngine
+    participant FileRepo
+    participant FTS5
+
+    User->>CLI: mcptube add <url>
+    CLI->>YouTubeExtractor: fetch transcript + metadata
+    YouTubeExtractor-->>CLI: segments, duration, channel
+
+    CLI->>SceneFrameExtractor: extract scene frames (ffmpeg)
+    SceneFrameExtractor-->>CLI: frame images (scene_000x.jpg)
+
+    CLI->>VisionDescriber: describe frames (LLM vision)
+    VisionDescriber-->>CLI: frame descriptions (prose)
+
+    CLI->>WikiExtractor: extract knowledge\n(transcript + frame descriptions)
+    WikiExtractor-->>CLI: entities, topics, concepts, video page
+
+    CLI->>WikiEngine: merge into wiki
+    WikiEngine->>FileRepo: write/update JSON pages\n(append entities, rewrite synthesis)
+    WikiEngine->>FTS5: update search index
+    FileRepo-->>WikiEngine: ✅
+    FTS5-->>WikiEngine: ✅
+    WikiEngine-->>CLI: wiki processed
+    CLI-->>User: ✅ Added + Wiki: full_analysis
+```
+
+---
+
+### Retrieval Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI
+    participant FTS5
+    participant FileRepo
+    participant Agent
+
+    User->>CLI: mcptube ask "What is RLHF?"
+
+    CLI->>FTS5: keyword search (sanitized query)
+    FTS5-->>CLI: candidate page slugs (ranked)
+
+    CLI->>FileRepo: load candidate pages (JSON)
+    FileRepo-->>CLI: wiki pages (entities, topics, concepts)
+
+    CLI->>FileRepo: load wiki TOC
+    FileRepo-->>CLI: table of contents (all page titles + types)
+
+    CLI->>Agent: candidates + TOC + question
+    Agent-->>CLI: reasoned answer with source citations
+
+    CLI-->>User: answer + (source-slug) citations
+```
+
+---
+
+### Subsystem Breakdown
+
+#### 1. Ingestion Pipeline
+
+**YouTubeExtractor** pulls transcript segments via `youtube-transcript-api` and video metadata via `yt-dlp`. Transcripts are chunked by natural segment boundaries, not fixed token windows — preserving semantic coherence.
+
+**SceneFrameExtractor** uses ffmpeg's perceptual scene-change filter (`select='gt(scene,{threshold})'`) rather than fixed-interval sampling. This is deliberate: fixed intervals waste tokens on static frames (slides held for 30s), while scene-change detection captures *transitions* — the moments of highest information density. The threshold (default `0.4`) is configurable.
+
+**VisionDescriber** sends detected frames to a vision-capable LLM (GPT-4o, Claude, Gemini — auto-detected via API key priority). Frame descriptions are plain prose, not structured JSON, to maximise the LLM's descriptive latitude.
+
+**Why this matters:** A transcript of a coding tutorial misses the code on screen. Scene-change vision capture recovers that signal without the token cost of dense fixed-interval sampling.
+
+---
+
+#### 2. WikiEngine — The Novel Core ⭐
+
+Inspired by the [Karpathy LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f), this is the most architecturally distinctive component.
+
+**WikiExtractor** takes the combined transcript + frame descriptions and prompts an LLM to extract four typed knowledge objects:
+
+| Type | Semantics | Update Policy |
+|------|-----------|---------------|
+| `video` | Immutable per-video summary + timestamps | Write-once |
+| `entity` | People, tools, companies | Append-only — new references added, never overwritten |
+| `topic` | Broad themes (e.g. "Scaling Laws") | Synthesis rewritten; per-video contributions immutable |
+| `concept` | Specific ideas (e.g. "RLHF") | Synthesis rewritten; per-video contributions immutable |
+
+**WikiEngine** handles merge semantics — when a new video references an existing entity or concept, it integrates the new evidence without destroying prior contributions. This is a **CRDT-like append model** for knowledge, not a vector store replacement index.
+
+**Why this matters:** Vector stores are retrieval indexes — they don't synthesize. Two videos about "attention mechanisms" produce two isolated chunks. The WikiEngine merges them into a single `concept-attention-mechanisms` page with a synthesis that evolves as evidence accumulates. Knowledge compounds.
+
+Version history is maintained for all non-immutable pages — every synthesis rewrite is snapshotted, enabling full auditability.
+
+---
+
+#### 3. Storage Layer
+
+**FileWikiRepository** stores wiki pages as JSON on disk, one file per page. Chosen over a document DB deliberately:
+- Human-readable and git-diffable
+- Trivially exportable to markdown/HTML
+- Schema evolution without migrations
+
+**SQLite FTS5** maintains a parallel search index over page titles, tags, and content. Chosen over a vector store because:
+- Zero embedding cost at query time
+- Deterministic, auditable results
+- Sub-millisecond latency at thousands of pages
+
+**Why not ChromaDB/Pinecone?** At wiki scale, BM25-style keyword search over *compiled knowledge pages* outperforms semantic similarity over *raw chunks* — the wiki pages are already semantically rich by construction.
+
+---
+
+#### 4. Hybrid Retrieval Agent ⭐
+
+The `ask` command uses a deliberate two-stage pattern:
+
+1. **FTS5 keyword search** — narrows the full wiki to a small candidate set (milliseconds, zero LLM cost)
+2. **LLM agent** — receives candidates + the wiki table of contents, reasons about relevance, synthesizes a grounded answer with source citations
+
+**Why this matters over RAG:** Standard RAG retrieves chunks and generates. The agent here retrieves *compiled knowledge pages* and *reasons*. The wiki TOC gives the agent structural awareness of what knowledge exists — enabling it to correctly say "I don't have information about X" rather than hallucinating from weak chunk matches.
+
+---
+
+#### 5. MCP Server
+
+Exposes all subsystems as tools consumable by any MCP-compatible client. Report and synthesis tools use a **passthrough pattern** — returning structured data for the client's own LLM to analyse, rather than making a second LLM call server-side. This avoids double-billing and lets the client model apply its own reasoning style.
+
+---
+
+### Key Design Decisions
+
+| Decision | Alternative Considered | Reason |
+|----------|----------------------|--------|
+| Scene-change frame extraction | Fixed-interval sampling | Higher signal/token ratio |
+| Wiki knowledge model | Vector store chunks | Knowledge compounds; no re-discovery per query |
+| FTS5 retrieval | Embedding similarity | Compiled wiki pages are already semantic |
+| File-based wiki storage | SQLite/document DB | Human-readable, git-diffable, zero migrations |
+| Append-only entity updates | Full rewrite | Source attribution preserved; full auditability |
+| Passthrough MCP reports | Server-side LLM | Avoids double-billing; client model reasons |
+
+---
+
 ## ✨ Features
 
 | Feature | CLI | MCP Server |

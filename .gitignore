@@ -42,3 +42,6 @@ dist/
 
 *.log
 *.txt
+*.html
+
+test.md
