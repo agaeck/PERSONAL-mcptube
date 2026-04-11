@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mcptube"
-version = "0.2.0"
+version = "0.2.1"
 description = "YouTube video knowledge engine — transcripts, vision, and persistent wiki"
 readme = "README.md"
 license = "MIT"
