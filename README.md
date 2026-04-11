@@ -78,6 +78,12 @@ flowchart TD
         AGENT
     end
 ```
+The system overview shows three distinct subsystems connected by a unidirectional data flow. The **Ingestion Pipeline** (left) transforms a raw YouTube URL into structured knowledge through four stages: transcript extraction, scene-change frame detection, vision-model description, and LLM-powered knowledge extraction. Each stage enriches the signal — raw video becomes text, text becomes typed knowledge objects.
+
+The **Knowledge Store** (center) is the persistent layer. The WikiEngine applies merge semantics — deciding whether to create new pages or append to existing ones — then writes JSON files to disk and updates the FTS5 search index in parallel. These two stores serve different access patterns: files for full-page reads and exports, FTS5 for sub-millisecond keyword retrieval.
+
+The **Retrieval** layer (right) combines both stores. The Ask Agent first narrows via FTS5, then loads full pages from disk, and finally reasons over candidates with structural awareness from the wiki TOC. The CLI and MCP Server sit alongside as thin presentation layers — they never contain business logic.
+
 
 ---
 
@@ -117,6 +123,14 @@ sequenceDiagram
     CLI-->>User: ✅ Added + Wiki: full_analysis
 ```
 
+The ingestion flow is a **write-once pipeline** — LLM-heavy at ingest time, but never repeated for the same video. This is the key cost tradeoff: invest tokens upfront to build compiled knowledge, so retrieval is cheap.
+
+The sequence shows two critical branching points. First, after transcript extraction, the pipeline forks into vision processing (scene frames → LLM vision descriptions) and feeds both streams into the WikiExtractor. This dual-signal approach means the LLM sees both what was *said* and what was *shown* — critical for content like coding tutorials or slide-based lectures where the transcript alone misses visual information.
+
+Second, the WikiEngine merge step is where knowledge compounding happens. Rather than blindly writing new pages, it checks for existing entities, topics, and concepts — appending new video contributions to existing pages and rewriting synthesis summaries. This is why ingesting video #10 makes the wiki smarter about videos #1–9 too: shared concepts get richer synthesis with each new source.
+
+The final FTS5 index update runs synchronously after the file write, ensuring search consistency. There is no eventual-consistency window — once `add_video` returns, all new knowledge is immediately searchable.
+
 ---
 
 ### Retrieval Flow
@@ -145,6 +159,12 @@ sequenceDiagram
 
     CLI-->>User: answer + (source-slug) citations
 ```
+
+The retrieval flow is deliberately **two-stage** to balance cost and intelligence. The first stage — FTS5 keyword search — runs entirely locally with zero LLM tokens, narrowing thousands of wiki pages to a ranked handful in milliseconds. Query sanitization strips special characters (e.g. `?`, `!`) that would break FTS5 syntax, ensuring robustness for natural-language questions.
+
+The second stage loads two types of context for the agent: the **candidate pages** (full detail — summaries, contributions, entity references) and the **wiki TOC** (a compact structural map of all knowledge). The TOC is critical — it gives the agent awareness of what it *doesn't* know. Without it, the agent would hallucinate answers from weak matches. With it, the agent can reason: "The wiki has pages on RLHF and scaling laws, but nothing on quantum computing — so I should say I don't have that information."
+
+In CLI mode (BYOK), the agent is an LLM call that synthesizes the final answer with source citations. In MCP server mode (passthrough), this stage returns the raw candidates and TOC to the client — letting the client's own model (Copilot, Claude, Gemini) do the reasoning. This dual-mode design means the server never requires an API key when used via MCP.
 
 ---
 
@@ -261,7 +281,7 @@ Exposes all subsystems as tools consumable by any MCP-compatible client. Report 
 ### Recommended: pipx
 
 ```bash
-pipx install mcptube-vision --python python3.12
+pipx install mcptube --python python3.12
 ```
 
 ### Alternative: pip
@@ -269,7 +289,7 @@ pipx install mcptube-vision --python python3.12
 ```bash
 python3.12 -m venv venv
 source venv/bin/activate
-pip install mcptube-vision
+pip install mcptube
 ```
 
 ### Verify installation
@@ -424,20 +444,180 @@ This captures visual content (slides, code, diagrams, demos) that transcripts al
 
 ---
 
-## 🔌 MCP Server
+## 🔌 MCP Client Setup
 
-### Configuration (Claude Desktop)
+mcptube exposes 25+ MCP tools via two transports:
+
+| Transport | How it works | Used by |
+|-----------|-------------|---------|
+| **Streamable HTTP** (`/mcp`) | Client connects to a running mcptube server | VS Code, Claude Code, Cursor, Windsurf, Codex, Gemini CLI |
+| **stdio** | MCP client spawns `mcptube` as a child process | Claude Desktop |
+
+> ℹ️ The MCP server is currently available for **local use only**. You must run `mcptube serve` locally or let the client spawn it.
+
+---
+
+### VS Code + GitHub Copilot ✅ Tested
+
+Open `Cmd+Shift+P` → **MCP: Open User Configuration** and add:
 
 ```json
 {
-    "mcpServers": {
-        "mcptube": {
-            "command": "mcptube",
-            "args": ["serve", "--stdio"]
-        }
+  "servers": {
+    "mcptube": {
+      "url": "http://127.0.0.1:9093/mcp"
     }
+  }
 }
 ```
+
+Then start the server in a terminal:
+
+```bash
+mcptube serve
+```
+
+---
+
+### Claude Code ✅ Tested
+
+```bash
+claude mcp add mcptube --transport http http://127.0.0.1:9093/mcp
+```
+
+Then start the server in a separate terminal:
+
+```bash
+mcptube serve
+```
+
+---
+
+### Claude Desktop
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+**If installed via `pipx` (recommended):**
+
+```json
+{
+  "mcpServers": {
+    "mcptube": {
+      "command": "mcptube",
+      "args": ["serve", "--stdio"]
+    }
+  }
+}
+```
+
+**If installed in a virtual environment:**
+
+```json
+{
+  "mcpServers": {
+    "mcptube": {
+      "command": "/full/path/to/.venv/bin/mcptube",
+      "args": ["serve", "--stdio"]
+    }
+  }
+}
+```
+
+No separate server needed — Claude Desktop spawns the process automatically.
+
+---
+
+### Cursor
+
+Create or edit `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project-scoped):
+
+```json
+{
+  "mcpServers": {
+    "mcptube": {
+      "url": "http://127.0.0.1:9093/mcp"
+    }
+  }
+}
+```
+
+Then start the server:
+
+```bash
+mcptube serve
+```
+
+---
+
+### Windsurf
+
+Edit `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "mcptube": {
+      "serverUrl": "http://127.0.0.1:9093/mcp"
+    }
+  }
+}
+```
+
+Then start the server:
+
+```bash
+mcptube serve
+```
+
+---
+
+### OpenAI Codex
+
+Edit `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.mcptube]
+url = "http://127.0.0.1:9093/mcp"
+```
+
+Then start the server:
+
+```bash
+mcptube serve
+```
+
+---
+
+### Gemini CLI
+
+Edit `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "mcptube": {
+      "httpUrl": "http://127.0.0.1:9093/mcp"
+    }
+  }
+}
+```
+
+Then start the server:
+
+```bash
+mcptube serve
+```
+
+---
+
+### Verify Connection
+
+Once connected, ask your MCP client:
+
+> use mcptube. list all videos in my library
+
+It should call the `list_videos` tool and return results.
+
 
 ### MCP Tools
 

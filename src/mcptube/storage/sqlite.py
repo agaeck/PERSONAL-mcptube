@@ -39,7 +39,7 @@ class SQLiteVideoRepository(VideoRepository):
                      Use ":memory:" for testing.
         """
         self._db_path = db_path or str(settings.db_path)
-        self._conn = sqlite3.connect(self._db_path)
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_db()
 

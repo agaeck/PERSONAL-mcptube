@@ -98,7 +98,8 @@ class FileWikiRepository(WikiRepository):
         (self._wiki_dir / "_history").mkdir(parents=True, exist_ok=True)
 
         # Initialize SQLite FTS5
-        self._conn = sqlite3.connect(self._db_path)
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+
         self._conn.row_factory = sqlite3.Row
         self._conn.execute(self._METADATA_CREATE)
         self._conn.execute(self._FTS_CREATE)
