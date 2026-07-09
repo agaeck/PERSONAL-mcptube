@@ -7,6 +7,7 @@ from pathlib import Path
 import yt_dlp
 
 from mcptube.config import settings
+from mcptube.ingestion.youtube import SAFE_VIDEO_ID_RE
 
 logger = logging.getLogger(__name__)
 
@@ -221,4 +222,6 @@ class SceneFrameExtractor:
     @staticmethod
     def _output_dir(video_id: str) -> Path:
         """Get the output directory for scene frames."""
+        if not SAFE_VIDEO_ID_RE.fullmatch(video_id):
+            raise SceneFrameError(f"Invalid video id: {video_id!r}")
         return settings.frames_dir / f"{video_id}_scenes"

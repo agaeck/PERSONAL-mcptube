@@ -7,6 +7,7 @@ from pathlib import Path
 import yt_dlp
 
 from mcptube.config import settings
+from mcptube.ingestion.youtube import SAFE_VIDEO_ID_RE
 
 logger = logging.getLogger(__name__)
 
@@ -107,5 +108,7 @@ class FrameExtractor:
     @staticmethod
     def _cache_path(video_id: str, timestamp: float) -> Path:
         """Generate a deterministic cache path for a frame."""
+        if not SAFE_VIDEO_ID_RE.fullmatch(video_id):
+            raise FrameExtractionError(f"Invalid video id: {video_id!r}")
         settings.frames_dir.mkdir(parents=True, exist_ok=True)
         return settings.frames_dir / f"{video_id}_{timestamp:.2f}.jpg"

@@ -20,6 +20,12 @@ def output_dir(tmp_path):
     return d
 
 
+def test_output_dir_rejects_traversal_id():
+    # video_id reaches this path sink directly via the get_frame_by_query tool.
+    with pytest.raises(SceneFrameError):
+        SceneFrameExtractor._output_dir("../../../etc/passwd")
+
+
 @pytest.fixture
 def cached_frames(output_dir):
     """Create fake cached scene frames with metadata."""

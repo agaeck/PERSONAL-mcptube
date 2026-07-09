@@ -77,6 +77,12 @@ class TestFrameExtractor:
         p2 = FrameExtractor._cache_path("abc123", 20.0)
         assert p1 != p2
 
+    def test_cache_path_rejects_traversal_id(self):
+        # video_id reaches this sink directly via the get_frame tool, so it must be
+        # validated locally instead of trusting an upstream repo.exists() check.
+        with pytest.raises(FrameExtractionError):
+            FrameExtractor._cache_path("../../../etc/passwd", 0.0)
+
     @patch("mcptube.ingestion.frames.yt_dlp.YoutubeDL")
     def test_resolve_stream_url(self, mock_ydl_class):
         mock_ydl = MagicMock()

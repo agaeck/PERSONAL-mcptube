@@ -17,6 +17,12 @@ logger = logging.getLogger(__name__)
 VIDEO_ID_PATTERN = r"[A-Za-z0-9_-]{11}"
 VIDEO_ID_RE = re.compile(VIDEO_ID_PATTERN)
 
+# A video id can arrive straight from a tool call (get_frame, get_frame_by_query),
+# where it becomes a filesystem path and a stream URL. Validate it as a safe token
+# (no path separators, no traversal) at those sinks. Deliberately platform-agnostic
+# — not the strict 11-char YouTube form — so non-YouTube ids stay supportable.
+SAFE_VIDEO_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
 
 class ExtractionError(Exception):
     """Raised when video extraction fails."""
