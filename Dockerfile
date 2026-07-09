@@ -24,4 +24,4 @@ VOLUME /data
 # Shell-form + exec: ${PORT} é expandido em runtime, e o exec repassa sinais
 # (SIGTERM) direto ao processo mcptube (parada limpa do container).
 EXPOSE 8081
-CMD ["/bin/sh", "-c", "exec mcptube serve --host 0.0.0.0 --port ${PORT:-8081}"]
+CMD ["/bin/sh", "-c", "exec mcptube serve --host 0.0.0.0 --port ${PORT:-8081} --path /"]

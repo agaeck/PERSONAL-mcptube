@@ -564,6 +564,7 @@ def serve(
     stdio: bool = typer.Option(False, "--stdio", help="Use stdio transport instead of HTTP."),
     host: str = typer.Option(settings.host, "--host", help="Host to bind to."),
     port: int = typer.Option(settings.port, "--port", help="Port to bind to."),
+    path: str = typer.Option("/mcp", "--path", help="HTTP path to serve the MCP endpoint at (use '/' to serve at root)."),
     reload: bool = typer.Option(False, "--reload", help="Enable hot-reload for development."),
 ) -> None:
     """Start the mcptube MCP server."""
@@ -573,5 +574,5 @@ def serve(
         typer.echo("Starting mcptube MCP server (stdio)...", err=True)
         mcp.run(transport="stdio")
     else:
-        typer.echo(f"Starting mcptube MCP server on http://{host}:{port}/mcp")
-        mcp.run(transport="streamable-http", host=host, port=port)
+        typer.echo(f"Starting mcptube MCP server on http://{host}:{port}{path}")
+        mcp.run(transport="streamable-http", host=host, port=port, path=path)
