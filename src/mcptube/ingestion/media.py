@@ -22,6 +22,7 @@ _YDL_OPTS = {
     "writeautomaticsub": True,
     "subtitleslangs": ["en", "en-orig", "en-US", "en-GB"],
     "subtitlesformat": "json3",
+    "allowed_extractors": ["youtube", "instagram", "tiktok", "facebook", "default"],
 }
 
 
