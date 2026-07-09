@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yt_dlp
 
-from mcptube.ingestion.youtube import ExtractionError, YouTubeExtractor
+from mcptube.ingestion.youtube import ExtractionError, YouTubeExtractor, extract_transcript_from_info
 
 
 class TestParseVideoId:
@@ -205,3 +205,28 @@ class TestParseJson3:
         segments = extractor._parse_json3(data)
         assert len(segments) == 1
         assert segments[0].text == "Real text"
+
+
+class TestExtractTranscriptFromInfo:
+    def _make_json3(self, segments):
+        """Build a json3 subtitle structure from (start_ms, duration_ms, text) tuples."""
+        return {
+            "events": [
+                {"tStartMs": s, "dDurationMs": d, "segs": [{"utf8": t}]}
+                for s, d, t in segments
+            ]
+        }
+
+    def _sub_entry(self, url="https://example.com/subs.json3"):
+        return {"en": [{"ext": "json3", "url": url}]}
+
+    @patch("mcptube.ingestion.youtube.urlopen")
+    def test_extract_transcript_from_info_parses_json3(self, mock_urlopen):
+        import json
+        json3 = self._make_json3([(0, 5000, "Hi")])
+        mock_urlopen.return_value.__enter__ = lambda s: s
+        mock_urlopen.return_value.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value.read.return_value = json.dumps(json3).encode()
+        info = {"subtitles": self._sub_entry(), "automatic_captions": {}}
+        segs = extract_transcript_from_info(info)
+        assert len(segs) == 1 and segs[0].text == "Hi"

@@ -201,3 +201,19 @@ class YouTubeExtractor:
             for ch in (info.get("chapters") or [])
             if ch.get("title")
         ]
+
+
+def extract_transcript_from_info(info: dict) -> list[TranscriptSegment]:
+    """Extrai o transcript (json3) de um info-dict do yt-dlp, se houver.
+
+    Esta função de módulo reutiliza a lógica de parsing json3 já existente
+    na classe YouTubeExtractor, permitindo que o transcript seja extraído
+    sem instanciar a classe.
+
+    Args:
+        info: Dicionário de informações retornado pelo yt-dlp.
+
+    Returns:
+        Lista de segmentos de transcript, ou lista vazia se nenhum for encontrado.
+    """
+    return YouTubeExtractor()._extract_transcript(info)
