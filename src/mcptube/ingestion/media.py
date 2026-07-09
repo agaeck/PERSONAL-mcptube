@@ -5,6 +5,7 @@ import logging
 import yt_dlp
 
 from mcptube.ingestion.platforms import namespaced_id, resolve_platform
+from mcptube.config import settings
 from mcptube.ingestion.youtube import (
     ExtractionError,
     SAFE_VIDEO_ID_RE,
@@ -23,7 +24,12 @@ _YDL_OPTS = {
     "subtitleslangs": ["en", "en-orig", "en-US", "en-GB"],
     "subtitlesformat": "json3",
     "allowed_extractors": ["youtube", "instagram", "tiktok", "facebook", "default"],
+    # YouTube 2026 (SABR/PO-token) pode não liberar o stream em IP de datacenter,
+    # mas metadados + legendas vêm mesmo assim — não abortar por falta de formato.
+    "ignore_no_formats_error": True,
 }
+if settings.cookies_file:
+    _YDL_OPTS["cookiefile"] = str(settings.cookies_file)
 
 
 class MediaExtractor:

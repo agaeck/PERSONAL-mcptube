@@ -66,6 +66,8 @@ class FrameExtractor:
             "format": "best[ext=mp4]/best",
             "skip_download": True,
         }
+        if settings.cookies_file:
+            ydl_opts["cookiefile"] = str(settings.cookies_file)
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(source_url, download=False)

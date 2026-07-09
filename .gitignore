@@ -48,3 +48,8 @@ test.md
 # Planos/specs e scratch de orquestração (não versionados)
 docs/plans/
 .superpowers/
+
+# Cookies (segredos) — nunca versionar
+cookies.txt
+*cookies*.json
+www.youtube.com*.json

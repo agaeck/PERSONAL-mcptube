@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # LLM (BYOK — used in CLI mode, wired up later)
     default_model: str = "gpt-4o"
 
+    # Caminho para um cookies.txt (Netscape) usado pelo yt-dlp — destrava o anti-bot
+    # do YouTube em IP de datacenter. Definido via env MCPTUBE_COOKIES_FILE.
+    cookies_file: Path | None = None
+
     @model_validator(mode="after")
     def _set_defaults(self) -> "Settings":
         """Set derived defaults that depend on other fields."""
