@@ -68,7 +68,6 @@ def mock_extractor():
             TranscriptSegment(start=5.0, duration=5.0, text="This is a test."),
         ],
     )
-    ext.parse_video_id = MagicMock(return_value="test1234567")
     return ext
 
 
@@ -140,6 +139,60 @@ class TestAddVideo:
         service.add_video("https://youtube.com/watch?v=test1234567")
         with pytest.raises(VideoAlreadyExistsError):
             service.add_video("https://youtube.com/watch?v=test1234567")
+
+    def test_add_duplicate_raises_with_namespaced_extractor_id(
+        self, repo, wiki_engine, mock_llm, mock_scene_extractor, mock_vision_describer
+    ):
+        # Reproduces the real pipeline: MediaExtractor.extract() always returns a
+        # namespaced id ("youtube_<native_id>"), never the raw id a URL parser would
+        # yield. The duplicate guard must check against that namespaced id.
+        ext = MagicMock()
+        ext.extract.return_value = Video(
+            video_id="youtube_BpibZSMGtdY",
+            platform="youtube",
+            source_url="https://www.youtube.com/watch?v=BpibZSMGtdY",
+            title="Namespaced Video",
+            channel="TestChannel",
+            duration=42.0,
+        )
+        svc = McpTubeService(
+            repository=repo,
+            extractor=ext,
+            wiki_engine=wiki_engine,
+            llm_client=mock_llm,
+            scene_extractor=mock_scene_extractor,
+            vision_describer=mock_vision_describer,
+        )
+        svc.add_video("https://www.youtube.com/watch?v=BpibZSMGtdY")
+        assert repo.exists("youtube_BpibZSMGtdY")
+        with pytest.raises(VideoAlreadyExistsError):
+            svc.add_video("https://www.youtube.com/watch?v=BpibZSMGtdY")
+
+    def test_add_video_tiktok_url_does_not_break_on_youtube_parsing(
+        self, repo, wiki_engine, mock_llm, mock_scene_extractor, mock_vision_describer
+    ):
+        # A TikTok URL can never be parsed by YouTubeExtractor.parse_video_id — the
+        # duplicate guard must not attempt that before extraction happens.
+        ext = MagicMock()
+        ext.extract.return_value = Video(
+            video_id="tiktok_7263",
+            platform="tiktok",
+            source_url="https://www.tiktok.com/@u/video/7263",
+            title="TikTok clip",
+            channel="u",
+            duration=15.0,
+        )
+        svc = McpTubeService(
+            repository=repo,
+            extractor=ext,
+            wiki_engine=wiki_engine,
+            llm_client=mock_llm,
+            scene_extractor=mock_scene_extractor,
+            vision_describer=mock_vision_describer,
+        )
+        video = svc.add_video("https://www.tiktok.com/@u/video/7263")
+        assert video.video_id == "tiktok_7263"
+        assert repo.exists("tiktok_7263")
 
     def test_add_video_text_only(self, service, mock_scene_extractor):
         service.add_video("https://youtube.com/watch?v=test1234567", text_only=True)
@@ -292,7 +345,6 @@ class TestAskVideo:
             video_id="test4567890", title="V2", channel="C", duration=60.0,
             transcript=[TranscriptSegment(start=0.0, duration=5.0, text="Second video.")],
         )
-        mock_extractor.parse_video_id = MagicMock(return_value="test4567890")
         service.add_video("https://youtube.com/watch?v=test4567890")
         answer = service.ask_videos(["test1234567", "test4567890"], "Compare them")
         assert len(answer) > 0

@@ -6,7 +6,7 @@ from pathlib import Path
 from mcptube.config import settings
 from mcptube.ingestion.frames import FrameExtractionError, FrameExtractor
 from mcptube.ingestion.media import MediaExtractor
-from mcptube.ingestion.youtube import ExtractionError, YouTubeExtractor
+from mcptube.ingestion.youtube import ExtractionError
 from mcptube.llm import LLMClient, LLMError
 from mcptube.models import Video
 from mcptube.report import Report, ReportBuilder
@@ -93,16 +93,15 @@ class McpTubeService:
             ExtractionError: If video extraction fails.
             VideoAlreadyExistsError: If the video is already in the library.
         """
-        video_id = YouTubeExtractor.parse_video_id(url)
+        logger.info("Ingesting video: %s", url)
+        video = self._extractor.extract(url)
 
-        if self._repo.exists(video_id):
+        if self._repo.exists(video.video_id):
             raise VideoAlreadyExistsError(
-                f"Video already in library: {video_id}. "
+                f"Video already in library: {video.video_id}. "
                 "Use remove_video() first to re-ingest."
             )
 
-        logger.info("Ingesting video: %s", url)
-        video = self._extractor.extract(url)
         self._repo.save(video)
 
         # Auto-classify if LLM is available
