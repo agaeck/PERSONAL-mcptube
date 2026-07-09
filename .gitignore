@@ -45,3 +45,6 @@ dist/
 *.html
 
 test.md
+# Planos/specs e scratch de orquestração (não versionados)
+docs/plans/
+.superpowers/
