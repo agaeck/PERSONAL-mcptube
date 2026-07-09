@@ -1,0 +1,12 @@
+# mcptube é Python + ffmpeg, então usamos build de container Docker (não Node/TS).
+runtime: "container"
+build:
+  dockerfile: "Dockerfile"
+  dockerBuildPath: "."
+startCommand:
+  type: "http"
+  # Modo MCP do mcptube não exige NENHUMA API key (as 17 tools são todas "No key").
+  # configSchema vazio = nada é pedido ao usuário no momento de conectar.
+  configSchema:
+    type: "object"
+    properties: {}
