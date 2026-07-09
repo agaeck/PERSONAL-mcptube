@@ -31,8 +31,18 @@ class TestChapter:
 
 class TestVideo:
     def test_url_computed(self):
-        video = Video(video_id="abc12345678", title="Test")
+        video = Video(
+            video_id="youtube_abc12345678",
+            title="Test",
+            source_url="https://www.youtube.com/watch?v=abc12345678",
+        )
         assert video.url == "https://www.youtube.com/watch?v=abc12345678"
+
+    def test_url_empty_without_source_url(self):
+        # No fallback: video_id is namespaced ("youtube_<id>"), so it can't be
+        # turned back into a valid youtube.com URL — url just mirrors source_url.
+        video = Video(video_id="abc12345678", title="Test")
+        assert video.url == ""
 
     def test_defaults(self):
         video = Video(video_id="abc12345678", title="Test")

@@ -46,6 +46,4 @@ class Video(BaseModel):
     @property
     def url(self) -> str:
         """URL canônica da plataforma de origem."""
-        if self.source_url:
-            return self.source_url
-        return f"https://www.youtube.com/watch?v={self.video_id}"
+        return self.source_url
