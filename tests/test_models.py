@@ -67,3 +67,9 @@ class TestVideo:
         assert len(restored.transcript) == len(sample_video.transcript)
         assert len(restored.chapters) == len(sample_video.chapters)
         assert restored.tags == sample_video.tags
+
+    def test_video_carries_platform_and_source_url(self):
+        v = Video(video_id="tiktok_7263", platform="tiktok",
+                  source_url="https://www.tiktok.com/@u/video/7263", title="t")
+        assert v.platform == "tiktok"
+        assert v.url == "https://www.tiktok.com/@u/video/7263"
