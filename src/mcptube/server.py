@@ -5,7 +5,7 @@ from fastmcp.utilities.types import Image
 
 from mcptube.config import settings
 from mcptube.ingestion.frames import FrameExtractionError
-from mcptube.ingestion.youtube import YouTubeExtractor
+from mcptube.ingestion.media import MediaExtractor
 from mcptube.llm import LLMClient
 from mcptube.models import Video
 from mcptube.service import McpTubeService, VideoAlreadyExistsError, VideoNotFoundError
@@ -24,9 +24,10 @@ from mcptube.wiki.storage import FileWikiRepository
 mcp = FastMCP(
     name="mcptube",
     instructions="""
-        mcptube is a YouTube video knowledge engine. It extracts metadata,
-        transcripts, and frames from YouTube videos, builds a persistent wiki
-        knowledge base, and makes everything searchable and queryable.
+        mcptube is a multi-platform video knowledge engine supporting YouTube,
+        Instagram, TikTok, and Facebook. It extracts metadata, frames, and
+        transcripts (YouTube only in Phase 1) from videos, builds a persistent
+        wiki knowledge base, and makes everything searchable and queryable.
 
         ## Tool Categories
 
@@ -100,7 +101,7 @@ def _get_service() -> McpTubeService:
         wiki_engine = WikiEngine(repo=wiki_repo, llm=llm)
         _service = McpTubeService(
             repository=SQLiteVideoRepository(),
-            extractor=YouTubeExtractor(),
+            extractor=MediaExtractor(),
             wiki_engine=wiki_engine,
             llm_client=llm,
         )
@@ -112,10 +113,12 @@ def _get_service() -> McpTubeService:
 
 @mcp.tool(annotations={"readOnlyHint": False, "idempotentHint": False})
 def add_video(url: str, text_only: bool = False) -> dict:
-    """Ingest a YouTube video and build wiki knowledge pages.
+    """Ingest a video from YouTube, Instagram, TikTok, or Facebook and build wiki knowledge pages.
+
+    Transcripts are available only for YouTube videos in Phase 1.
 
     Args:
-        url: YouTube video URL (supports youtube.com/watch, youtu.be, /embed/).
+        url: Video URL from YouTube, Instagram, TikTok, or Facebook.
         text_only: If True, skip vision frame analysis (cheaper, faster).
     """
     try:
