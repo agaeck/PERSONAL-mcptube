@@ -1,0 +1,17 @@
+# Contexto de build enxuto — o Dockerfile só precisa de pyproject.toml, README.md e src/
+.venv/
+.git/
+.superpowers/
+docs/plans/
+docs/
+tests/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.env
+.vscode/
+.idea/
