@@ -30,6 +30,18 @@ class TestParseVideoId:
         with pytest.raises(ExtractionError):
             YouTubeExtractor.parse_video_id("https://example.com/not-youtube")
 
+    def test_rejects_traversal_in_v_param(self):
+        # The ?v= fallback used to accept any 11-char string (length-only check),
+        # letting a path-traversal payload through as the "video id".
+        with pytest.raises(ExtractionError):
+            YouTubeExtractor.parse_video_id("https://www.youtube.com/watch?v=../../../ab")
+
+    def test_rejects_non_ascii_id(self):
+        # Real YouTube ids are ASCII base64url. Regex \w is unicode-aware by default,
+        # so the charset must be pinned to ASCII to reject ids YouTube never mints.
+        with pytest.raises(ExtractionError):
+            YouTubeExtractor.parse_video_id("https://www.youtube.com/watch?v=café1234567")
+
 
 class TestExtract:
     def _make_info(self, *, subtitles=None, auto_captions=None, chapters=None):
@@ -145,6 +157,25 @@ class TestExtract:
         extractor = YouTubeExtractor()
         with pytest.raises(ExtractionError, match="Failed to extract"):
             extractor.extract("https://www.youtube.com/watch?v=BpibZSMGtdY")
+
+    @patch("mcptube.ingestion.youtube.yt_dlp.YoutubeDL")
+    def test_extract_ignores_attacker_host_ssrf(self, mock_ydl_class):
+        # SSRF: a URL whose host is attacker-controlled but embeds a valid-looking
+        # youtube id must NOT be handed verbatim to yt-dlp — otherwise yt-dlp's
+        # GenericIE follows the attacker/internal host (e.g. the 169.254.169.254
+        # cloud-metadata endpoint). Only the canonical youtube.com URL rebuilt from
+        # the validated 11-char id may be fetched.
+        info = self._make_info()
+        mock_ydl = MagicMock()
+        mock_ydl.extract_info.return_value = info
+        mock_ydl_class.return_value.__enter__ = lambda s: mock_ydl
+        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
+
+        malicious = "https://169.254.169.254.attacker.tld/youtube.com/watch?v=BpibZSMGtdY"
+        YouTubeExtractor().extract(malicious)
+
+        fetched_url = mock_ydl.extract_info.call_args.args[0]
+        assert fetched_url == "https://www.youtube.com/watch?v=BpibZSMGtdY"
 
 
 class TestParseJson3:

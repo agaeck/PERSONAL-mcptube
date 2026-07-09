@@ -12,6 +12,11 @@ from mcptube.models import Chapter, TranscriptSegment, Video
 
 logger = logging.getLogger(__name__)
 
+# Canonical YouTube video id: exactly 11 base64url chars. Single source of truth,
+# reused by the URL patterns and the ?v= fallback so the two can't drift apart.
+VIDEO_ID_PATTERN = r"[A-Za-z0-9_-]{11}"
+VIDEO_ID_RE = re.compile(VIDEO_ID_PATTERN)
+
 
 class ExtractionError(Exception):
     """Raised when video extraction fails."""
@@ -25,10 +30,10 @@ class YouTubeExtractor:
     """
 
     _URL_PATTERNS = [
-        re.compile(r"(?:youtube\.com/watch\?.*v=)([\w-]{11})"),
-        re.compile(r"(?:youtu\.be/)([\w-]{11})"),
-        re.compile(r"(?:youtube\.com/embed/)([\w-]{11})"),
-        re.compile(r"(?:youtube\.com/v/)([\w-]{11})"),
+        re.compile(rf"(?:youtube\.com/watch\?.*v=)({VIDEO_ID_PATTERN})"),
+        re.compile(rf"(?:youtu\.be/)({VIDEO_ID_PATTERN})"),
+        re.compile(rf"(?:youtube\.com/embed/)({VIDEO_ID_PATTERN})"),
+        re.compile(rf"(?:youtube\.com/v/)({VIDEO_ID_PATTERN})"),
     ]
 
     _LANG_PREFERENCE = ("en", "en-orig", "en-US", "en-GB")
@@ -46,7 +51,11 @@ class YouTubeExtractor:
             ExtractionError: If extraction fails.
         """
         video_id = self.parse_video_id(url)
-        info = self._fetch_info(url)
+        # SSRF guard: never hand the caller's raw URL to yt-dlp — its GenericIE would
+        # follow an attacker-controlled/internal host (e.g. 169.254.169.254). Rebuild
+        # the canonical URL from the validated id so only youtube.com is ever fetched.
+        canonical_url = f"https://www.youtube.com/watch?v={video_id}"
+        info = self._fetch_info(canonical_url)
         transcript = self._extract_transcript(info)
         chapters = self._extract_chapters(info)
 
@@ -75,10 +84,11 @@ class YouTubeExtractor:
             if match:
                 return match.group(1)
 
-        # Fallback: query parameter parsing
+        # Fallback: query parameter parsing. Validate the id charset (not just the
+        # length) so a traversal payload like ?v=../../../ab can't pass as an id.
         parsed = urlparse(url)
         video_id = parse_qs(parsed.query).get("v", [None])[0]
-        if video_id and len(video_id) == 11:
+        if video_id and VIDEO_ID_RE.fullmatch(video_id):
             return video_id
 
         raise ExtractionError(f"Could not extract video ID from URL: {url}")
