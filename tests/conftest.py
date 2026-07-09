@@ -38,6 +38,8 @@ def sample_video(sample_segments):
     """Pre-built Video model with transcript and chapters."""
     return Video(
         video_id="dQw4w9WgXcQ",
+        platform="youtube",
+        source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         title="Intro to Machine Learning",
         description="A beginner's guide to ML concepts.",
         channel="TechChannel",
@@ -70,10 +72,10 @@ def chroma_store():
 
 @pytest.fixture
 def mock_extractor(sample_video):
-    """YouTubeExtractor with mocked yt-dlp returning sample_video."""
-    from mcptube.ingestion.youtube import YouTubeExtractor
+    """MediaExtractor with mocked yt-dlp returning sample_video."""
+    from mcptube.ingestion.media import MediaExtractor
 
-    extractor = YouTubeExtractor()
+    extractor = MediaExtractor()
     with patch.object(extractor, "extract", return_value=sample_video) as mock:
         extractor._mock = mock
         yield extractor

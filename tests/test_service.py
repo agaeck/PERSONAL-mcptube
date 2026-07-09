@@ -102,6 +102,7 @@ def service(repo, mock_extractor, wiki_engine, mock_llm, mock_scene_extractor, m
 def sample_video():
     return Video(
         video_id="test1234567",
+        source_url="https://youtube.com/watch?v=test1234567",
         title="Test Video",
         description="A test video",
         channel="TestChannel",
@@ -358,3 +359,10 @@ class TestFrames:
         with patch.object(service._frame_extractor, "extract_frame", return_value="/tmp/frame.jpg"):
             result = service.get_frame_by_query("test1234567", "hello")
             assert result["text"] == "Hello world."
+
+    def test_get_frame_passes_source_url(self, service, repo, sample_video):
+        repo.save(sample_video)
+        with patch.object(service._frame_extractor, "extract_frame", return_value="/tmp/frame.jpg") as mock_extract:
+            service.get_frame(sample_video.video_id, 10.0)
+        called = mock_extract.call_args
+        assert called.args[2] == sample_video.source_url  # (video_id, timestamp, source_url)

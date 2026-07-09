@@ -19,6 +19,8 @@ class SQLiteVideoRepository(VideoRepository):
     _CREATE_TABLE = """
         CREATE TABLE IF NOT EXISTS videos (
             video_id      TEXT PRIMARY KEY,
+            platform      TEXT DEFAULT 'youtube',
+            source_url    TEXT DEFAULT '',
             title         TEXT NOT NULL,
             description   TEXT DEFAULT '',
             channel       TEXT DEFAULT '',
@@ -52,10 +54,12 @@ class SQLiteVideoRepository(VideoRepository):
         """Persist a video to storage. Upserts if video_id already exists."""
         sql = """
             INSERT INTO videos (
-                video_id, title, description, channel, duration,
+                video_id, platform, source_url, title, description, channel, duration,
                 thumbnail_url, chapters, transcript, tags, added_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(video_id) DO UPDATE SET
+                platform = excluded.platform,
+                source_url = excluded.source_url,
                 title = excluded.title,
                 description = excluded.description,
                 channel = excluded.channel,
@@ -67,6 +71,8 @@ class SQLiteVideoRepository(VideoRepository):
         """
         self._conn.execute(sql, (
             video.video_id,
+            video.platform,
+            video.source_url,
             video.title,
             video.description,
             video.channel,
@@ -122,6 +128,8 @@ class SQLiteVideoRepository(VideoRepository):
 
         return Video(
             video_id=row["video_id"],
+            platform=row["platform"],
+            source_url=row["source_url"],
             title=row["title"],
             description=row["description"],
             channel=row["channel"],

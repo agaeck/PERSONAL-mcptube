@@ -5,6 +5,7 @@ from pathlib import Path
 
 from mcptube.config import settings
 from mcptube.ingestion.frames import FrameExtractionError, FrameExtractor
+from mcptube.ingestion.media import MediaExtractor
 from mcptube.ingestion.youtube import ExtractionError, YouTubeExtractor
 from mcptube.llm import LLMClient, LLMError
 from mcptube.models import Video
@@ -45,7 +46,7 @@ class McpTubeService:
     def __init__(
         self,
         repository: VideoRepository,
-        extractor: YouTubeExtractor | None = None,
+        extractor: MediaExtractor | None = None,
         wiki_engine: WikiEngine | None = None,
         frame_extractor: FrameExtractor | None = None,
         llm_client: LLMClient | None = None,
@@ -54,7 +55,7 @@ class McpTubeService:
 
     ) -> None:
         self._repo = repository
-        self._extractor = extractor or YouTubeExtractor()
+        self._extractor = extractor or MediaExtractor()
         self._wiki = wiki_engine
         self._frame_extractor = frame_extractor or FrameExtractor()
         self._llm = llm_client or LLMClient()
@@ -120,7 +121,9 @@ class McpTubeService:
                 frame_descriptions = None
                 if not text_only:
                     try:
-                        frames = self._scene_extractor.extract_scene_frames(video.video_id)
+                        frames = self._scene_extractor.extract_scene_frames(
+                            video.video_id, video.source_url
+                        )
                         frame_descriptions = self._vision_describer.describe_frames(frames)
                         logger.info("Vision: described %d frames", len(frame_descriptions))
                     except (SceneFrameError, LLMError) as e:
@@ -304,9 +307,8 @@ class McpTubeService:
             VideoNotFoundError: If the video is not in the library.
             FrameExtractionError: If frame extraction fails.
         """
-        if not self._repo.exists(video_id):
-            raise VideoNotFoundError(f"Video not found: {video_id}")
-        return self._frame_extractor.extract_frame(video_id, timestamp)
+        video = self.get_info(video_id)  # raises VideoNotFoundError if absent
+        return self._frame_extractor.extract_frame(video_id, timestamp, video.source_url)
 
     def get_frame_by_query(self, video_id: str, query: str) -> dict:
         """Search transcript and extract a frame at the best matching moment.
@@ -340,7 +342,7 @@ class McpTubeService:
         if best_seg is None:
             raise VideoNotFoundError(f"No transcript match for query: {query}")
 
-        frame_path = self._frame_extractor.extract_frame(video_id, best_seg.start)
+        frame_path = self._frame_extractor.extract_frame(video_id, best_seg.start, video.source_url)
         return {
             "path": frame_path,
             "start": best_seg.start,
