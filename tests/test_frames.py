@@ -106,3 +106,9 @@ class TestFrameExtractor:
         mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
         FrameExtractor()._resolve_stream_url("https://www.tiktok.com/@u/video/7263")
         assert ydl.extract_info.call_args.args[0] == "https://www.tiktok.com/@u/video/7263"
+
+    def test_resolve_stream_url_rejects_unsupported_host(self):
+        # Defense-in-depth: source_url is read back from storage, not the original
+        # request, so it must be re-validated against the platform allowlist here too.
+        with pytest.raises(FrameExtractionError):
+            FrameExtractor()._resolve_stream_url("https://evil.com/x")

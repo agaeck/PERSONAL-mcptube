@@ -166,7 +166,7 @@ class TestResolveStreamUrl:
         mock_ydl_class.return_value = mock_ydl
 
         with pytest.raises(SceneFrameError, match="no info"):
-            extractor._resolve_stream_url("abc123")
+            extractor._resolve_stream_url("https://www.youtube.com/watch?v=abc123")
 
     @patch("mcptube.ingestion.scene_frames.yt_dlp.YoutubeDL")
     def test_resolve_no_stream_url(self, mock_ydl_class, extractor):
@@ -177,7 +177,13 @@ class TestResolveStreamUrl:
         mock_ydl_class.return_value = mock_ydl
 
         with pytest.raises(SceneFrameError, match="No stream URL"):
-            extractor._resolve_stream_url("abc123")
+            extractor._resolve_stream_url("https://www.youtube.com/watch?v=abc123")
+
+    def test_resolve_stream_url_rejects_unsupported_host(self, extractor):
+        # Defense-in-depth: source_url is read back from storage, not the original
+        # request, so it must be re-validated against the platform allowlist here too.
+        with pytest.raises(SceneFrameError):
+            extractor._resolve_stream_url("https://evil.com/x")
 
 
 class TestExtractWithFfmpeg:

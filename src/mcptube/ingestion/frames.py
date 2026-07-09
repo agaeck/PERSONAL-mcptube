@@ -7,6 +7,7 @@ from pathlib import Path
 import yt_dlp
 
 from mcptube.config import settings
+from mcptube.ingestion.platforms import UnsupportedPlatformError, resolve_platform
 from mcptube.ingestion.youtube import SAFE_VIDEO_ID_RE
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,11 @@ class FrameExtractor:
 
     def _resolve_stream_url(self, source_url: str) -> str:
         """Resolve a direct stream URL from the platform's source URL."""
+        try:
+            resolve_platform(source_url)
+        except UnsupportedPlatformError as e:
+            raise FrameExtractionError(str(e)) from e
+
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
