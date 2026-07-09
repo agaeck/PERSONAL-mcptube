@@ -24,12 +24,13 @@ class FrameExtractor:
     a single frame. Frames are cached on disk to avoid re-extraction.
     """
 
-    def extract_frame(self, video_id: str, timestamp: float) -> Path:
+    def extract_frame(self, video_id: str, timestamp: float, source_url: str) -> Path:
         """Extract a single frame at the given timestamp.
 
         Args:
-            video_id: YouTube video ID.
+            video_id: Namespaced video ID (used only for the cache path).
             timestamp: Time in seconds to extract frame at.
+            source_url: URL of the originating platform (YouTube, Instagram, etc.).
 
         Returns:
             Path to the extracted JPEG frame.
@@ -44,16 +45,15 @@ class FrameExtractor:
             return cache_path
 
         # Resolve direct stream URL via yt-dlp
-        stream_url = self._resolve_stream_url(video_id)
+        stream_url = self._resolve_stream_url(source_url)
 
         # Extract frame via ffmpeg
         self._extract_with_ffmpeg(stream_url, timestamp, cache_path)
 
         return cache_path
 
-    def _resolve_stream_url(self, video_id: str) -> str:
-        """Resolve a direct stream URL from a YouTube video ID."""
-        url = f"https://www.youtube.com/watch?v={video_id}"
+    def _resolve_stream_url(self, source_url: str) -> str:
+        """Resolve a direct stream URL from the platform's source URL."""
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
@@ -62,12 +62,12 @@ class FrameExtractor:
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+                info = ydl.extract_info(source_url, download=False)
                 if info is None:
-                    raise FrameExtractionError(f"yt-dlp returned no info for: {video_id}")
+                    raise FrameExtractionError(f"yt-dlp returned no info for: {source_url}")
                 stream_url = info.get("url")
                 if not stream_url:
-                    raise FrameExtractionError(f"No stream URL resolved for: {video_id}")
+                    raise FrameExtractionError(f"No stream URL resolved for: {source_url}")
                 return stream_url
         except yt_dlp.utils.DownloadError as e:
             raise FrameExtractionError(f"Failed to resolve stream URL: {e}") from e

@@ -145,8 +145,17 @@ class TestResolveStreamUrl:
         mock_ydl.extract_info.return_value = {"url": "https://stream.example.com/video.mp4"}
         mock_ydl_class.return_value = mock_ydl
 
-        url = extractor._resolve_stream_url("abc123")
+        url = extractor._resolve_stream_url("https://www.youtube.com/watch?v=abc123")
         assert url == "https://stream.example.com/video.mp4"
+
+    @patch("mcptube.ingestion.scene_frames.yt_dlp.YoutubeDL")
+    def test_scene_resolve_uses_source_url(self, mock_ydl_class):
+        ydl = MagicMock()
+        ydl.extract_info.return_value = {"url": "https://stream/v.mp4"}
+        mock_ydl_class.return_value.__enter__ = lambda s: ydl
+        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
+        SceneFrameExtractor(threshold=0.4)._resolve_stream_url("https://www.tiktok.com/@u/video/7263")
+        assert ydl.extract_info.call_args.args[0] == "https://www.tiktok.com/@u/video/7263"
 
     @patch("mcptube.ingestion.scene_frames.yt_dlp.YoutubeDL")
     def test_resolve_no_info(self, mock_ydl_class, extractor):
@@ -226,11 +235,15 @@ class TestExtractSceneFrames:
     @patch.object(SceneFrameExtractor, "_output_dir")
     def test_returns_cached(self, mock_dir, extractor, output_dir, cached_frames):
         mock_dir.return_value = output_dir
-        frames = extractor.extract_scene_frames("abc123")
+        frames = extractor.extract_scene_frames(
+            "abc123", "https://www.youtube.com/watch?v=abc123"
+        )
         assert len(frames) == 3
 
     @patch.object(SceneFrameExtractor, "_output_dir")
     def test_max_frames_limits_cached(self, mock_dir, extractor, output_dir, cached_frames):
         mock_dir.return_value = output_dir
-        frames = extractor.extract_scene_frames("abc123", max_frames=2)
+        frames = extractor.extract_scene_frames(
+            "abc123", "https://www.youtube.com/watch?v=abc123", max_frames=2
+        )
         assert len(frames) == 2

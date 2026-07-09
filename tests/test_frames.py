@@ -28,9 +28,11 @@ class TestFrameExtractor:
 
             with patch.object(extractor, "_extract_with_ffmpeg") as mock_ffmpeg:
                 mock_ffmpeg.side_effect = lambda url, ts, out: out.write_bytes(b"\xff\xd8fake")
-                path = extractor.extract_frame("abc123", 10.0)
+                path = extractor.extract_frame(
+                    "abc123", 10.0, "https://www.youtube.com/watch?v=abc123"
+                )
 
-            mock_resolve.assert_called_once_with("abc123")
+            mock_resolve.assert_called_once_with("https://www.youtube.com/watch?v=abc123")
 
     @patch.object(FrameExtractor, "_cache_path")
     def test_extract_frame_cached(self, mock_cache_path, tmp_path):
@@ -39,7 +41,9 @@ class TestFrameExtractor:
         mock_cache_path.return_value = cached
 
         extractor = FrameExtractor()
-        path = extractor.extract_frame("abc123", 10.0)
+        path = extractor.extract_frame(
+            "abc123", 10.0, "https://www.youtube.com/watch?v=abc123"
+        )
         assert path == cached
 
     def test_extract_with_ffmpeg_not_found(self, tmp_path):
@@ -91,5 +95,14 @@ class TestFrameExtractor:
         mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
 
         extractor = FrameExtractor()
-        url = extractor._resolve_stream_url("abc123")
+        url = extractor._resolve_stream_url("https://www.youtube.com/watch?v=abc123")
         assert url == "https://stream.example.com/video.mp4"
+
+    @patch("mcptube.ingestion.frames.yt_dlp.YoutubeDL")
+    def test_resolve_stream_url_uses_source_url(self, mock_ydl_class):
+        ydl = MagicMock()
+        ydl.extract_info.return_value = {"url": "https://stream/v.mp4"}
+        mock_ydl_class.return_value.__enter__ = lambda s: ydl
+        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
+        FrameExtractor()._resolve_stream_url("https://www.tiktok.com/@u/video/7263")
+        assert ydl.extract_info.call_args.args[0] == "https://www.tiktok.com/@u/video/7263"

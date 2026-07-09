@@ -45,12 +45,14 @@ class SceneFrameExtractor:
     def extract_scene_frames(
         self,
         video_id: str,
+        source_url: str,
         max_frames: int | None = None,
     ) -> list[dict]:
-        """Extract key frames at scene-change points from a YouTube video.
+        """Extract key frames at scene-change points from a video.
 
         Args:
-            video_id: YouTube video ID.
+            video_id: Namespaced video ID (used only for the output directory).
+            source_url: URL of the originating platform (YouTube, Instagram, etc.).
             max_frames: Maximum frames to extract. Defaults to _MAX_FRAMES.
 
         Returns:
@@ -72,7 +74,7 @@ class SceneFrameExtractor:
             return cached[:max_frames]
 
         # Resolve direct stream URL
-        stream_url = self._resolve_stream_url(video_id)
+        stream_url = self._resolve_stream_url(source_url)
 
         # Extract frames via ffmpeg scene filter
         frames = self._extract_with_ffmpeg(stream_url, output_dir, max_frames)
@@ -80,9 +82,8 @@ class SceneFrameExtractor:
         logger.info("Extracted %d scene-change frames for %s", len(frames), video_id)
         return frames
 
-    def _resolve_stream_url(self, video_id: str) -> str:
-        """Resolve a direct stream URL from a YouTube video ID."""
-        url = f"https://www.youtube.com/watch?v={video_id}"
+    def _resolve_stream_url(self, source_url: str) -> str:
+        """Resolve a direct stream URL from the platform's source URL."""
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
@@ -91,12 +92,12 @@ class SceneFrameExtractor:
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+                info = ydl.extract_info(source_url, download=False)
                 if info is None:
-                    raise SceneFrameError(f"yt-dlp returned no info for: {video_id}")
+                    raise SceneFrameError(f"yt-dlp returned no info for: {source_url}")
                 stream_url = info.get("url")
                 if not stream_url:
-                    raise SceneFrameError(f"No stream URL resolved for: {video_id}")
+                    raise SceneFrameError(f"No stream URL resolved for: {source_url}")
                 return stream_url
         except yt_dlp.utils.DownloadError as e:
             raise SceneFrameError(f"Failed to resolve stream URL: {e}") from e
