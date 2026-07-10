@@ -98,6 +98,10 @@ class SceneFrameExtractor:
         }
         if settings.cookies_file:
             ydl_opts["cookiefile"] = str(settings.cookies_file)
+        if settings.pot_base_url:
+            ydl_opts["extractor_args"] = {
+                "youtubepot-bgutilhttp": {"base_url": [settings.pot_base_url]}
+            }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(source_url, download=False)

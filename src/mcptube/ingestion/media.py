@@ -15,7 +15,7 @@ from mcptube.models import Chapter, Video
 
 logger = logging.getLogger(__name__)
 
-_YDL_OPTS = {
+_YDL_OPTS_BASE = {
     "quiet": True,
     "no_warnings": True,
     "skip_download": True,
@@ -28,8 +28,18 @@ _YDL_OPTS = {
     # mas metadados + legendas vêm mesmo assim — não abortar por falta de formato.
     "ignore_no_formats_error": True,
 }
-if settings.cookies_file:
-    _YDL_OPTS["cookiefile"] = str(settings.cookies_file)
+
+
+def _build_ydl_opts() -> dict:
+    """Monta os ydl_opts na chamada (não no import) — settings ficam testáveis."""
+    opts = dict(_YDL_OPTS_BASE)
+    if settings.cookies_file:
+        opts["cookiefile"] = str(settings.cookies_file)
+    if settings.pot_base_url:
+        opts["extractor_args"] = {
+            "youtubepot-bgutilhttp": {"base_url": [settings.pot_base_url]}
+        }
+    return opts
 
 
 class MediaExtractor:
@@ -67,7 +77,7 @@ class MediaExtractor:
 
     def _fetch_info(self, url: str) -> dict:
         try:
-            with yt_dlp.YoutubeDL(_YDL_OPTS) as ydl:
+            with yt_dlp.YoutubeDL(_build_ydl_opts()) as ydl:
                 info = ydl.extract_info(url, download=False)
         except yt_dlp.utils.DownloadError as e:
             raise ExtractionError(f"Failed to extract video info: {e}") from e

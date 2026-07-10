@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # do YouTube em IP de datacenter. Definido via env MCPTUBE_COOKIES_FILE.
     cookies_file: Path | None = None
 
+    # Base URL do bgutil PO token provider (ex.: http://mcptube-pot:4416). Quando setado,
+    # o yt-dlp obtém PO tokens dele (anti-bot do YouTube sem cookies/conta/login).
+    # Definido via env MCPTUBE_POT_BASE_URL.
+    pot_base_url: str | None = None
+
     @model_validator(mode="after")
     def _set_defaults(self) -> "Settings":
         """Set derived defaults that depend on other fields."""
