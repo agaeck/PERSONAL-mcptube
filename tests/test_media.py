@@ -15,7 +15,7 @@ def _mock_ydl(mock_cls, info):
     mock_cls.return_value.__exit__ = MagicMock(return_value=False)
 
 
-@patch("mcptube.ingestion.media.yt_dlp.YoutubeDL")
+@patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
 def test_extract_tiktok_namespaced_no_transcript(mock_cls):
     _mock_ydl(mock_cls, {"id": "7263", "extractor": "TikTok",
                           "title": "t", "webpage_url": "https://www.tiktok.com/@u/video/7263"})
@@ -26,7 +26,7 @@ def test_extract_tiktok_namespaced_no_transcript(mock_cls):
     assert v.transcript == []
 
 
-@patch("mcptube.ingestion.media.yt_dlp.YoutubeDL")
+@patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
 def test_extract_rejects_generic_extractor(mock_cls):
     _mock_ydl(mock_cls, {"id": "x", "extractor": "generic", "webpage_url": "https://www.facebook.com/x"})
     with pytest.raises(Exception):

@@ -137,7 +137,7 @@ class TestOutputDir:
 
 
 class TestResolveStreamUrl:
-    @patch("mcptube.ingestion.scene_frames.yt_dlp.YoutubeDL")
+    @patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
     def test_successful_resolve(self, mock_ydl_class, extractor):
         mock_ydl = MagicMock()
         mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
@@ -148,7 +148,7 @@ class TestResolveStreamUrl:
         url = extractor._resolve_stream_url("https://www.youtube.com/watch?v=abc123")
         assert url == "https://stream.example.com/video.mp4"
 
-    @patch("mcptube.ingestion.scene_frames.yt_dlp.YoutubeDL")
+    @patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
     def test_scene_resolve_uses_source_url(self, mock_ydl_class):
         ydl = MagicMock()
         ydl.extract_info.return_value = {"url": "https://stream/v.mp4"}
@@ -157,7 +157,7 @@ class TestResolveStreamUrl:
         SceneFrameExtractor(threshold=0.4)._resolve_stream_url("https://www.tiktok.com/@u/video/7263")
         assert ydl.extract_info.call_args.args[0] == "https://www.tiktok.com/@u/video/7263"
 
-    @patch("mcptube.ingestion.scene_frames.yt_dlp.YoutubeDL")
+    @patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
     def test_resolve_no_info(self, mock_ydl_class, extractor):
         mock_ydl = MagicMock()
         mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
@@ -168,7 +168,7 @@ class TestResolveStreamUrl:
         with pytest.raises(SceneFrameError, match="no info"):
             extractor._resolve_stream_url("https://www.youtube.com/watch?v=abc123")
 
-    @patch("mcptube.ingestion.scene_frames.yt_dlp.YoutubeDL")
+    @patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
     def test_resolve_no_stream_url(self, mock_ydl_class, extractor):
         mock_ydl = MagicMock()
         mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)

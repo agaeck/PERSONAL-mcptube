@@ -87,7 +87,7 @@ class TestFrameExtractor:
         with pytest.raises(FrameExtractionError):
             FrameExtractor._cache_path("../../../etc/passwd", 0.0)
 
-    @patch("mcptube.ingestion.frames.yt_dlp.YoutubeDL")
+    @patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
     def test_resolve_stream_url(self, mock_ydl_class):
         mock_ydl = MagicMock()
         mock_ydl.extract_info.return_value = {"url": "https://stream.example.com/video.mp4"}
@@ -98,7 +98,7 @@ class TestFrameExtractor:
         url = extractor._resolve_stream_url("https://www.youtube.com/watch?v=abc123")
         assert url == "https://stream.example.com/video.mp4"
 
-    @patch("mcptube.ingestion.frames.yt_dlp.YoutubeDL")
+    @patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
     def test_resolve_stream_url_uses_source_url(self, mock_ydl_class):
         ydl = MagicMock()
         ydl.extract_info.return_value = {"url": "https://stream/v.mp4"}

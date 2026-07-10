@@ -5,7 +5,7 @@ import logging
 import yt_dlp
 
 from mcptube.ingestion.platforms import namespaced_id, resolve_platform
-from mcptube.config import settings
+from mcptube.ingestion.ytdlp_session import extract_info_with_retry, network_opts
 from mcptube.ingestion.youtube import (
     ExtractionError,
     SAFE_VIDEO_ID_RE,
@@ -32,14 +32,7 @@ _YDL_OPTS_BASE = {
 
 def _build_ydl_opts() -> dict:
     """Monta os ydl_opts na chamada (não no import) — settings ficam testáveis."""
-    opts = dict(_YDL_OPTS_BASE)
-    if settings.cookies_file:
-        opts["cookiefile"] = str(settings.cookies_file)
-    if settings.pot_base_url:
-        opts["extractor_args"] = {
-            "youtubepot-bgutilhttp": {"base_url": [settings.pot_base_url]}
-        }
-    return opts
+    return network_opts(_YDL_OPTS_BASE)
 
 
 class MediaExtractor:
@@ -77,8 +70,7 @@ class MediaExtractor:
 
     def _fetch_info(self, url: str) -> dict:
         try:
-            with yt_dlp.YoutubeDL(_build_ydl_opts()) as ydl:
-                info = ydl.extract_info(url, download=False)
+            info = extract_info_with_retry(url, _build_ydl_opts())
         except yt_dlp.utils.DownloadError as e:
             raise ExtractionError(f"Failed to extract video info: {e}") from e
         if info is None:

@@ -8,6 +8,7 @@ import yt_dlp
 
 from mcptube.config import settings
 from mcptube.ingestion.platforms import UnsupportedPlatformError, resolve_platform
+from mcptube.ingestion.ytdlp_session import extract_info_with_retry, network_opts
 from mcptube.ingestion.youtube import SAFE_VIDEO_ID_RE
 
 logger = logging.getLogger(__name__)
@@ -60,29 +61,22 @@ class FrameExtractor:
         except UnsupportedPlatformError as e:
             raise FrameExtractionError(str(e)) from e
 
-        ydl_opts = {
+        ydl_opts = network_opts({
             "quiet": True,
             "no_warnings": True,
             "format": "best[ext=mp4]/best",
             "skip_download": True,
-        }
-        if settings.cookies_file:
-            ydl_opts["cookiefile"] = str(settings.cookies_file)
-        if settings.pot_base_url:
-            ydl_opts["extractor_args"] = {
-                "youtubepot-bgutilhttp": {"base_url": [settings.pot_base_url]}
-            }
+        })
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(source_url, download=False)
-                if info is None:
-                    raise FrameExtractionError(f"yt-dlp returned no info for: {source_url}")
-                stream_url = info.get("url")
-                if not stream_url:
-                    raise FrameExtractionError(f"No stream URL resolved for: {source_url}")
-                return stream_url
+            info = extract_info_with_retry(source_url, ydl_opts)
         except yt_dlp.utils.DownloadError as e:
             raise FrameExtractionError(f"Failed to resolve stream URL: {e}") from e
+        if info is None:
+            raise FrameExtractionError(f"yt-dlp returned no info for: {source_url}")
+        stream_url = info.get("url")
+        if not stream_url:
+            raise FrameExtractionError(f"No stream URL resolved for: {source_url}")
+        return stream_url
 
     def _extract_with_ffmpeg(self, stream_url: str, timestamp: float, output: Path) -> None:
         """Use ffmpeg to seek and extract a single JPEG frame."""
