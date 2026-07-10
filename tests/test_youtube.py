@@ -230,3 +230,43 @@ class TestExtractTranscriptFromInfo:
         info = {"subtitles": self._sub_entry(), "automatic_captions": {}}
         segs = extract_transcript_from_info(info)
         assert len(segs) == 1 and segs[0].text == "Hi"
+
+
+class TestFindJson3LanguageFallback:
+    """O transcript não pode ser só-inglês: vídeo pt-BR (ou qualquer idioma) deve funcionar."""
+
+    def _extractor_com_download_fake(self, monkeypatch):
+        ext = YouTubeExtractor()
+        monkeypatch.setattr(
+            YouTubeExtractor, "_download_json", lambda self, url: {"marker": url}
+        )
+        return ext
+
+    def test_falls_back_to_any_available_language(self, monkeypatch):
+        ext = self._extractor_com_download_fake(monkeypatch)
+        subs = {"pt-BR": [{"ext": "json3", "url": "u-ptbr"}]}
+        assert ext._find_json3(subs) == {"marker": "u-ptbr"}
+
+    def test_prefers_video_original_language(self, monkeypatch):
+        ext = self._extractor_com_download_fake(monkeypatch)
+        subs = {
+            "en": [{"ext": "json3", "url": "u-en"}],
+            "de": [{"ext": "json3", "url": "u-de"}],
+        }
+        assert ext._find_json3(subs, orig_lang="de") == {"marker": "u-de"}
+
+    def test_orig_suffix_beats_random_language(self, monkeypatch):
+        ext = self._extractor_com_download_fake(monkeypatch)
+        subs = {
+            "fr": [{"ext": "json3", "url": "u-fr"}],
+            "pt-orig": [{"ext": "json3", "url": "u-pt-orig"}],
+        }
+        assert ext._find_json3(subs) == {"marker": "u-pt-orig"}
+
+    def test_english_preference_unchanged(self, monkeypatch):
+        ext = self._extractor_com_download_fake(monkeypatch)
+        subs = {
+            "pt-BR": [{"ext": "json3", "url": "u-ptbr"}],
+            "en": [{"ext": "json3", "url": "u-en"}],
+        }
+        assert ext._find_json3(subs) == {"marker": "u-en"}

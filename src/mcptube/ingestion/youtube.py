@@ -124,27 +124,39 @@ class YouTubeExtractor:
         subtitles = info.get("subtitles") or {}
         auto_captions = info.get("automatic_captions") or {}
 
-        sub_data = self._find_json3(subtitles) or self._find_json3(auto_captions)
+        orig_lang = info.get("language")
+        sub_data = self._find_json3(subtitles, orig_lang) or self._find_json3(
+            auto_captions, orig_lang
+        )
         if not sub_data:
-            logger.warning("No English transcript available for: %s", info.get("id"))
+            logger.warning("No transcript available for: %s", info.get("id"))
             return []
 
         return self._parse_json3(sub_data)
 
-    def _find_json3(self, subs: dict) -> dict | None:
-        """Find and download json3 subtitle data for the best English variant."""
-        # Try preferred language codes first
-        for lang in self._LANG_PREFERENCE:
+    def _find_json3(self, subs: dict, orig_lang: str | None = None) -> dict | None:
+        """Find and download json3 subtitle data for the best language variant.
+
+        Ordem: idioma original do vídeo → preferidos (en) → sufixo '-orig'
+        (marca o idioma falado nas legendas automáticas) → qualquer disponível.
+        Transcript em qualquer língua vale mais que nenhum — quem consome é um LLM.
+        """
+        candidates: list[str] = []
+        if orig_lang:
+            candidates += [orig_lang, f"{orig_lang}-orig"]
+        candidates += self._LANG_PREFERENCE
+        candidates += [lang for lang in subs if lang.startswith("en")]
+        candidates += [lang for lang in subs if lang.endswith("-orig")]
+        candidates += sorted(subs)
+
+        seen: set[str] = set()
+        for lang in candidates:
+            if lang in seen:
+                continue
+            seen.add(lang)
             data = self._get_json3_for_lang(subs, lang)
             if data:
                 return data
-
-        # Fallback: any en-* variant
-        for lang in subs:
-            if lang.startswith("en"):
-                data = self._get_json3_for_lang(subs, lang)
-                if data:
-                    return data
 
         return None
 
