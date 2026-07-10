@@ -1,0 +1,47 @@
+# Deploy self-hosted do mcptube (VM Oracle). O TLS fica no Caddy NATIVO do host,
+# que faz reverse-proxy do domínio para 127.0.0.1:8091 — fora deste compose.
+#
+# Segredo do path: NUNCA aqui. Vem de um `.env` na raiz (gitignored):
+#   MCPTUBE_PATH_SECRET=<hex>
+name: mcptube
+
+services:
+  # Gera PO tokens (desafio BotGuard do Google) para o yt-dlp — sem conta, login
+  # ou cookies. Porta 4416 sem auth: só é alcançável dentro da rede mcptube-net.
+  # A tag DEVE casar com o pin do plugin no Dockerfile; atualize os dois juntos.
+  mcptube-pot:
+    image: brainicism/bgutil-ytdlp-pot-provider:1.3.1
+    container_name: mcptube-pot
+    restart: unless-stopped
+    networks: [mcptube-net]
+
+  mcptube-server:
+    build: .
+    image: mcptube:latest
+    container_name: mcptube-server
+    restart: unless-stopped
+    depends_on: [mcptube-pot]
+    ports:
+      - "127.0.0.1:8091:8081"
+    environment:
+      PORT: "8081"
+      MCPTUBE_POT_BASE_URL: http://mcptube-pot:4416
+    volumes:
+      - mcptube-data:/data
+    networks: [mcptube-net]
+    # ${VAR:?msg} aborta o `up` se o .env não definir o segredo (evita servir em "/").
+    command:
+      [
+        "sh",
+        "-c",
+        "exec mcptube serve --host 0.0.0.0 --port 8081 --path /${MCPTUBE_PATH_SECRET:?defina MCPTUBE_PATH_SECRET no .env}",
+      ]
+
+# Volume e rede já existem do deploy anterior — external evita recriar/perder dados.
+volumes:
+  mcptube-data:
+    external: true
+
+networks:
+  mcptube-net:
+    external: true

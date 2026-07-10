@@ -10,10 +10,11 @@ WORKDIR /app
 COPY . /app
 
 # Instala o mcptube a partir do código do SEU fork (pyproject.toml já existe no repo).
-# Alternativa: troque por  pip install --no-cache-dir mcptube  se quiser fixar a
-# versão publicada no PyPI em vez de buildar o source (mais estável, mas ignora
-# qualquer modificação futura que você faça no fork).
-RUN pip install --no-cache-dir .
+# bgutil-ytdlp-pot-provider: plugin do yt-dlp que pede PO tokens ao container
+# mcptube-pot (dependência de deploy, não do pacote — por isso não vai no pyproject).
+# A versão DEVE casar com a imagem brainicism/... do docker-compose.yml — o upstream
+# exige plugin e provider em versões iguais; atualize os dois juntos.
+RUN pip install --no-cache-dir . bgutil-ytdlp-pot-provider==1.3.1
 
 # Diretório único para SQLite + índice ChromaDB + frames em cache.
 ENV MCPTUBE_DATA_DIR=/data
