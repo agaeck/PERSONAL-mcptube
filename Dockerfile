@@ -6,6 +6,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
+# deno: runtime JS que o yt-dlp (2026+) usa para resolver os desafios JS do YouTube.
+# Sem ele, o yt-dlp cai no cliente android_vr — que não usa PO token e leva
+# "Sign in to confirm you're not a bot" em vídeos com enforcement mais duro.
+COPY --from=denoland/deno:bin-2.9.2 /deno /usr/local/bin/deno
+
 WORKDIR /app
 COPY . /app
 

@@ -6,29 +6,63 @@
 name: mcptube
 
 services:
+  # Egresso "residencial" via Cloudflare WARP (grátis, sem conta): o YouTube passa a
+  # ver um IP do 1.1.1.1 — usado por milhões de usuários reais — em vez do IP de
+  # datacenter da Oracle (bot-checked). O mcptube-server COMPARTILHA este namespace
+  # de rede (network_mode abaixo), então TODO o tráfego dele (yt-dlp, download de
+  # legendas, ffmpeg puxando stream) sai pelo túnel sem nenhuma mudança de código.
+  mcptube-warp:
+    image: caomingjun/warp
+    container_name: mcptube-warp
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 0
+      net.ipv4.conf.all.src_valid_mark: 1
+    environment:
+      WARP_SLEEP: "5"
+    volumes:
+      # Persiste o registro WARP entre restarts (evita re-registrar a cada up).
+      - mcptube-warp-data:/var/lib/cloudflare-warp
+    # A porta do MCP é publicada AQUI porque o server usa o netns deste container.
+    ports:
+      - "127.0.0.1:8091:8081"
+    networks: [mcptube-net]
+
   # Gera PO tokens (desafio BotGuard do Google) para o yt-dlp — sem conta, login
-  # ou cookies. Porta 4416 sem auth: só é alcançável dentro da rede mcptube-net.
+  # ou cookies. Também vive no netns do WARP: (1) o server o alcança em
+  # 127.0.0.1:4416 (o DNS do WARP não resolve nomes do Docker); (2) o token
+  # BotGuard nasce do MESMO IP de egresso usado no playback — identidade coesa.
+  # A porta 4416 segue inacessível de fora (só 8091 é publicada, em 127.0.0.1).
   # A tag DEVE casar com o pin do plugin no Dockerfile; atualize os dois juntos.
   mcptube-pot:
     image: brainicism/bgutil-ytdlp-pot-provider:1.3.1
     container_name: mcptube-pot
     restart: unless-stopped
-    networks: [mcptube-net]
+    depends_on: [mcptube-warp]
+    network_mode: service:mcptube-warp
 
   mcptube-server:
     build: .
     image: mcptube:latest
     container_name: mcptube-server
     restart: unless-stopped
-    depends_on: [mcptube-pot]
-    ports:
-      - "127.0.0.1:8091:8081"
+    depends_on: [mcptube-warp, mcptube-pot]
+    # Compartilha a rede do mcptube-warp: egresso via WARP, e alcança o
+    # mcptube-pot normalmente (o warp está na mcptube-net; sub-redes locais
+    # ficam fora do túnel). Com network_mode, `ports:`/`networks:` são proibidos
+    # aqui — a porta vive no serviço mcptube-warp.
+    network_mode: service:mcptube-warp
     environment:
       PORT: "8081"
-      MCPTUBE_POT_BASE_URL: http://mcptube-pot:4416
+      # 127.0.0.1: o pot compartilha o mesmo netns (via mcptube-warp).
+      MCPTUBE_POT_BASE_URL: http://127.0.0.1:4416
     volumes:
       - mcptube-data:/data
-    networks: [mcptube-net]
     # ${VAR:?msg} aborta o `up` se o .env não definir o segredo (evita servir em "/").
     command:
       [
@@ -37,10 +71,11 @@ services:
         "exec mcptube serve --host 0.0.0.0 --port 8081 --path /${MCPTUBE_PATH_SECRET:?defina MCPTUBE_PATH_SECRET no .env}",
       ]
 
-# Volume e rede já existem do deploy anterior — external evita recriar/perder dados.
 volumes:
+  # Volume de dados já existe do deploy anterior — external evita recriar/perder.
   mcptube-data:
     external: true
+  mcptube-warp-data:
 
 networks:
   mcptube-net:
