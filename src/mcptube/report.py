@@ -76,7 +76,7 @@ class ReportBuilder:
 
         raw = self._llm._complete(prompt, max_tokens=16000)
         report = self._parse_report(raw, video.video_id)
-        self._extract_frames(report)
+        self._extract_frames(report, [video])
 
         return report
 
@@ -111,7 +111,7 @@ class ReportBuilder:
 
         # For multi-video, pass None — video_id comes from LLM response per frame
         report = self._parse_report(raw, default_video_id=None)
-        self._extract_frames(report)
+        self._extract_frames(report, videos)
 
         return report
 
@@ -309,16 +309,19 @@ class ReportBuilder:
             key_takeaways=data.get("key_takeaways", []),
         )
 
-    def _extract_frames(self, report: Report) -> None:
+    def _extract_frames(self, report: Report, videos: list[Video]) -> None:
         """Extract all frames selected by the LLM."""
+        source_urls = {v.video_id: v.source_url for v in videos}
         for section in report.sections:
             for frame in section.frames:
-                if not frame.video_id:
-                    logger.warning("Frame missing video_id, skipping")
+                # The LLM picks the video_id; it may omit it or make one up.
+                source_url = source_urls.get(frame.video_id)
+                if source_url is None:
+                    logger.warning("Frame references unknown video %r, skipping", frame.video_id)
                     continue
                 try:
                     frame.path = self._frames.extract_frame(
-                        frame.video_id, frame.timestamp
+                        frame.video_id, frame.timestamp, source_url
                     )
                 except FrameExtractionError as e:
                     logger.warning("Frame extraction failed at %.1fs: %s", frame.timestamp, e)

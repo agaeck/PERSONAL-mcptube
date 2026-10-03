@@ -3,7 +3,7 @@
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, create_autospec, patch
 
 import pytest
 
@@ -16,9 +16,19 @@ def report_builder(mock_llm, mock_frames):
     return ReportBuilder(llm=mock_llm, frame_extractor=mock_frames)
 
 
-def _report_json(*, title="Test Report", with_frames=False, video_id=None):
+@pytest.fixture
+def strict_frames(tmp_path):
+    """FrameExtractor double that rejects calls not matching the real signatures."""
+    from mcptube.ingestion.frames import FrameExtractor
+
+    extractor = create_autospec(FrameExtractor, instance=True)
+    extractor.extract_frame.return_value = tmp_path / "frame.jpg"
+    return extractor
+
+
+def _report_json(*, title="Test Report", with_frames=False, video_id=None, frames=None):
     """Helper to build a valid report JSON string."""
-    frames = []
+    frames = frames or []
     if with_frames:
         f = {"timestamp": 10.0, "reason": "Key moment"}
         if video_id:
@@ -86,6 +96,55 @@ class TestFrameExtraction:
             _set_llm_response(mock_llm, _report_json(with_frames=True, video_id=sample_video.video_id))
             report = builder.generate_single(sample_video)
             assert report.sections[0].frames[0].path is None
+
+    def test_single_resolves_frame_from_video_source_url(self, sample_video, mock_llm, strict_frames):
+        builder = ReportBuilder(llm=mock_llm, frame_extractor=strict_frames)
+        _set_llm_response(mock_llm, _report_json(with_frames=True))
+
+        report = builder.generate_single(sample_video)
+
+        strict_frames.extract_frame.assert_called_once_with(
+            "dQw4w9WgXcQ", 10.0, "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        )
+        assert report.sections[0].frames[0].path == strict_frames.extract_frame.return_value
+
+    def test_multi_resolves_each_frame_from_its_own_video(self, sample_video, mock_llm, strict_frames):
+        reel = sample_video.model_copy(update={
+            "video_id": "instagram_Cxyz123",
+            "platform": "instagram",
+            "source_url": "https://www.instagram.com/reel/Cxyz123/",
+        })
+        builder = ReportBuilder(llm=mock_llm, frame_extractor=strict_frames)
+        _set_llm_response(mock_llm, _report_json(frames=[
+            {"video_id": "dQw4w9WgXcQ", "timestamp": 10.0, "reason": "Slide"},
+            {"video_id": "instagram_Cxyz123", "timestamp": 20.0, "reason": "Demo"},
+        ]))
+
+        builder.generate_multi([sample_video, reel], "ML overview")
+
+        assert strict_frames.extract_frame.call_count == 2
+        strict_frames.extract_frame.assert_has_calls([
+            call("dQw4w9WgXcQ", 10.0, "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+            call("instagram_Cxyz123", 20.0, "https://www.instagram.com/reel/Cxyz123/"),
+        ])
+
+    def test_skips_only_frames_without_a_known_video(self, sample_video, mock_llm, strict_frames):
+        builder = ReportBuilder(llm=mock_llm, frame_extractor=strict_frames)
+        _set_llm_response(mock_llm, _report_json(frames=[
+            {"video_id": "made_up_id", "timestamp": 5.0, "reason": "Invented id"},
+            {"timestamp": 7.0, "reason": "No id"},
+            {"video_id": "dQw4w9WgXcQ", "timestamp": 10.0, "reason": "Slide"},
+        ]))
+
+        report = builder.generate_multi([sample_video], "ML overview")
+
+        strict_frames.extract_frame.assert_called_once_with(
+            "dQw4w9WgXcQ", 10.0, "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        )
+        invented, missing, known = report.sections[0].frames
+        assert invented.path is None
+        assert missing.path is None
+        assert known.path == strict_frames.extract_frame.return_value
 
 
 class TestParseReport:
