@@ -1,7 +1,9 @@
 """Tests for scene-change frame extraction via ffmpeg."""
 
 import json
+import subprocess
 import pytest
+import yt_dlp
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
@@ -18,6 +20,21 @@ def output_dir(tmp_path):
     d = tmp_path / "frames" / "abc123_scenes"
     d.mkdir(parents=True)
     return d
+
+
+@pytest.fixture
+def fake_download(monkeypatch):
+    """Stand in for yt-dlp: 'download' a file where the caller asked for it."""
+    calls = []
+
+    def fake(url, opts, download=False):
+        calls.append({"url": url, "opts": opts, "download": download})
+        path = Path(opts["paths"]["home"]) / "video.mp4"
+        path.write_bytes(b"fake-video")
+        return {"requested_downloads": [{"filepath": str(path)}]}
+
+    monkeypatch.setattr("mcptube.ingestion.scene_frames.extract_info_with_retry", fake)
+    return calls
 
 
 def test_output_dir_rejects_traversal_id():
@@ -136,54 +153,79 @@ class TestOutputDir:
         assert path == tmp_path / "frames" / "abc123_scenes"
 
 
-class TestResolveStreamUrl:
-    @patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
-    def test_successful_resolve(self, mock_ydl_class, extractor):
-        mock_ydl = MagicMock()
-        mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
-        mock_ydl.__exit__ = MagicMock(return_value=False)
-        mock_ydl.extract_info.return_value = {"url": "https://stream.example.com/video.mp4"}
-        mock_ydl_class.return_value = mock_ydl
+class TestDownloadVideo:
+    URL = "https://www.youtube.com/watch?v=abc123"
 
-        url = extractor._resolve_stream_url("https://www.youtube.com/watch?v=abc123")
-        assert url == "https://stream.example.com/video.mp4"
+    def test_returns_the_downloaded_file(self, extractor, tmp_path, fake_download):
+        path = extractor._download_video(self.URL, tmp_path)
+        assert path.read_bytes() == b"fake-video"
+        assert path.parent == tmp_path
 
-    @patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
-    def test_scene_resolve_uses_source_url(self, mock_ydl_class):
-        ydl = MagicMock()
-        ydl.extract_info.return_value = {"url": "https://stream/v.mp4"}
-        mock_ydl_class.return_value.__enter__ = lambda s: ydl
-        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
-        SceneFrameExtractor(threshold=0.4)._resolve_stream_url("https://www.tiktok.com/@u/video/7263")
-        assert ydl.extract_info.call_args.args[0] == "https://www.tiktok.com/@u/video/7263"
+    def test_downloads_the_source_url(self, extractor, tmp_path, fake_download):
+        extractor._download_video("https://www.tiktok.com/@u/video/7263", tmp_path)
+        assert fake_download[0]["url"] == "https://www.tiktok.com/@u/video/7263"
+        assert fake_download[0]["download"] is True
 
-    @patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
-    def test_resolve_no_info(self, mock_ydl_class, extractor):
-        mock_ydl = MagicMock()
-        mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
-        mock_ydl.__exit__ = MagicMock(return_value=False)
-        mock_ydl.extract_info.return_value = None
-        mock_ydl_class.return_value = mock_ydl
+    def test_requests_a_360p_stream(self, extractor, tmp_path, fake_download, select_format, youtube_formats):
+        extractor._download_video(self.URL, tmp_path)
+        opts = fake_download[0]["opts"]
+        picked = select_format(
+            youtube_formats, {"format": opts["format"], "format_sort": opts["format_sort"]}
+        )
+        # Decoding a whole video at 720p does not fit in the ffmpeg timeout.
+        assert picked["format_id"] == "134"
 
+    def test_refuses_live_streams(self, extractor, tmp_path, fake_download, select_format, youtube_formats):
+        # A live stream keeps downloading until it ends; nothing else bounds the call.
+        extractor._download_video(self.URL, tmp_path)
+        opts = {k: fake_download[0]["opts"][k] for k in ("format", "format_sort", "match_filter")}
+        assert "format_id" not in select_format(youtube_formats, opts, is_live=True)
+        assert select_format(youtube_formats, opts, is_live=False)["format_id"] == "134"
+
+    def test_downloads_only_the_video_from_a_playlist_url(self, extractor, tmp_path, fake_download):
+        extractor._download_video(self.URL + "&list=PL123", tmp_path)
+        assert fake_download[0]["opts"]["noplaylist"] is True
+
+    def test_dest_dir_is_not_expanded_as_an_output_template(self, extractor, tmp_path, fake_download):
+        dest = tmp_path / "50%(id)s"
+        dest.mkdir()
+        extractor._download_video(self.URL, dest)
+        opts = fake_download[0]["opts"]
+        with yt_dlp.YoutubeDL({"quiet": True, "paths": opts["paths"], "outtmpl": opts["outtmpl"]}) as ydl:
+            filename = ydl.prepare_filename({"id": "abc", "title": "t", "ext": "mp4"})
+        assert Path(filename) == dest / "video.mp4"
+
+    def test_no_info(self, extractor, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "mcptube.ingestion.scene_frames.extract_info_with_retry", lambda *a, **k: None
+        )
         with pytest.raises(SceneFrameError, match="no info"):
-            extractor._resolve_stream_url("https://www.youtube.com/watch?v=abc123")
+            extractor._download_video(self.URL, tmp_path)
 
-    @patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
-    def test_resolve_no_stream_url(self, mock_ydl_class, extractor):
-        mock_ydl = MagicMock()
-        mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
-        mock_ydl.__exit__ = MagicMock(return_value=False)
-        mock_ydl.extract_info.return_value = {"url": None}
-        mock_ydl_class.return_value = mock_ydl
+    @pytest.mark.parametrize(
+        "downloads", [[], [{"filepath": "/nonexistent/video.mp4"}]], ids=["none", "file-missing"]
+    )
+    def test_nothing_downloaded(self, downloads, extractor, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "mcptube.ingestion.scene_frames.extract_info_with_retry",
+            lambda *a, **k: {"requested_downloads": downloads},
+        )
+        with pytest.raises(SceneFrameError, match="No video file"):
+            extractor._download_video(self.URL, tmp_path)
 
-        with pytest.raises(SceneFrameError, match="No stream URL"):
-            extractor._resolve_stream_url("https://www.youtube.com/watch?v=abc123")
+    def test_download_error_is_wrapped(self, extractor, tmp_path, monkeypatch):
+        def failing(*args, **kwargs):
+            raise yt_dlp.utils.DownloadError("HTTP Error 403: Forbidden")
 
-    def test_resolve_stream_url_rejects_unsupported_host(self, extractor):
+        monkeypatch.setattr("mcptube.ingestion.scene_frames.extract_info_with_retry", failing)
+        with pytest.raises(SceneFrameError, match="Failed to download video.*403"):
+            extractor._download_video(self.URL, tmp_path)
+
+    def test_rejects_unsupported_host(self, extractor, tmp_path):
         # Defense-in-depth: source_url is read back from storage, not the original
         # request, so it must be re-validated against the platform allowlist here too.
         with pytest.raises(SceneFrameError):
-            extractor._resolve_stream_url("https://evil.com/x")
+            extractor._download_video("https://evil.com/x", tmp_path)
 
 
 class TestExtractWithFfmpeg:
@@ -211,6 +253,17 @@ class TestExtractWithFfmpeg:
         mock_run.return_value = MagicMock(returncode=1, stderr="Error: invalid input")
         with pytest.raises(SceneFrameError, match="ffmpeg failed"):
             extractor._extract_with_ffmpeg("https://stream.example.com/v.mp4", output_dir, 50)
+
+    @patch("mcptube.ingestion.scene_frames.subprocess.run")
+    def test_ffmpeg_failure_reports_end_of_stderr(self, mock_run, extractor, output_dir):
+        stderr = (
+            "ffmpeg version 7.1.5 Copyright (c) the FFmpeg developers\n"
+            + "  configuration: --enable-x\n" * 20
+            + "Error opening input files: Invalid data found when processing input\n"
+        )
+        mock_run.return_value = MagicMock(returncode=1, stderr=stderr)
+        with pytest.raises(SceneFrameError, match="Invalid data found"):
+            extractor._extract_with_ffmpeg(output_dir / "video.mp4", output_dir, 50)
 
     @patch("mcptube.ingestion.scene_frames.subprocess.run")
     def test_ffmpeg_timeout(self, mock_run, extractor, output_dir):
@@ -253,3 +306,59 @@ class TestExtractSceneFrames:
             "abc123", "https://www.youtube.com/watch?v=abc123", max_frames=2
         )
         assert len(frames) == 2
+
+    @patch.object(SceneFrameExtractor, "_output_dir")
+    def test_runs_ffmpeg_on_a_downloaded_local_file(
+        self, mock_dir, extractor, output_dir, fake_download, monkeypatch
+    ):
+        mock_dir.return_value = output_dir
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            source = Path(cmd[cmd.index("-i") + 1])
+            seen["existed_during_ffmpeg"] = source.is_file()
+            (output_dir / "scene_0001.jpg").write_bytes(b"\xff\xd8fake")
+            return MagicMock(
+                returncode=0,
+                stderr="[Parsed_showinfo_2 @ 0x1] n:0 pts:0 pts_time:3.000 pos:0\n",
+            )
+
+        monkeypatch.setattr("mcptube.ingestion.scene_frames.subprocess.run", fake_run)
+        frames = extractor.extract_scene_frames("abc123", "https://www.youtube.com/watch?v=abc123")
+
+        assert seen["existed_during_ffmpeg"]
+        assert [f["timestamp"] for f in frames] == [3.0]
+
+    @patch.object(SceneFrameExtractor, "_output_dir")
+    def test_temp_video_removed_after_success(
+        self, mock_dir, extractor, output_dir, fake_download, monkeypatch
+    ):
+        mock_dir.return_value = output_dir
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["source"] = Path(cmd[cmd.index("-i") + 1])
+            (output_dir / "scene_0001.jpg").write_bytes(b"\xff\xd8fake")
+            return MagicMock(returncode=0, stderr="")
+
+        monkeypatch.setattr("mcptube.ingestion.scene_frames.subprocess.run", fake_run)
+        extractor.extract_scene_frames("abc123", "https://www.youtube.com/watch?v=abc123")
+
+        assert not seen["source"].exists()
+
+    @patch.object(SceneFrameExtractor, "_output_dir")
+    def test_temp_video_removed_when_ffmpeg_fails(
+        self, mock_dir, extractor, output_dir, fake_download, monkeypatch
+    ):
+        mock_dir.return_value = output_dir
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            seen["source"] = Path(cmd[cmd.index("-i") + 1])
+            raise subprocess.TimeoutExpired(cmd="ffmpeg", timeout=120)
+
+        monkeypatch.setattr("mcptube.ingestion.scene_frames.subprocess.run", fake_run)
+        with pytest.raises(SceneFrameError, match="timed out"):
+            extractor.extract_scene_frames("abc123", "https://www.youtube.com/watch?v=abc123")
+
+        assert not seen["source"].exists()

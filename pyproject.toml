@@ -23,7 +23,7 @@ classifiers = [
 
 dependencies = [
     "fastmcp>=3.0,<4.0",
-    "yt-dlp>=2025.0.0",
+    "yt-dlp>=2026.8.19",
     "typer>=0.9",
     "pydantic-settings>=2.0",
     "litellm>=1.50",

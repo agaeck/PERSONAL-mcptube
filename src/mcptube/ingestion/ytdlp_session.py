@@ -35,13 +35,33 @@ def network_opts(base_opts: dict) -> dict:
     return opts
 
 
-def extract_info_with_retry(url: str, opts: dict, attempts: int = 3) -> dict | None:
-    """extract_info(download=False) com retry/backoff para erros transitórios."""
+def video_stream_opts(max_res: int) -> dict:
+    """Format selection for frame extraction: one stream that carries video.
+
+    "bv*" accepts video-only formats. Frames need no audio, and YouTube stopped
+    offering pre-muxed https formats on the clients yt-dlp can still use
+    (yt-dlp >= 2026.08), so a "best"-style selector fails there with
+    "Requested format is not available".
+    """
+    return {
+        "format": "bv*",
+        "format_sort": [
+            f"res:{max_res}",  # caps the smallest dimension, so vertical videos count too
+            "proto",  # plain https before HLS: a single seekable file
+            "vcodec:h264",  # decoded natively by every ffmpeg build
+        ],
+    }
+
+
+def extract_info_with_retry(
+    url: str, opts: dict, attempts: int = 3, download: bool = False
+) -> dict | None:
+    """extract_info with retry/backoff for transient errors."""
     last_error: yt_dlp.utils.DownloadError | None = None
     for attempt in range(1, attempts + 1):
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
-                return ydl.extract_info(url, download=False)
+                return ydl.extract_info(url, download=download)
         except yt_dlp.utils.DownloadError as e:
             last_error = e
             if attempt < attempts:

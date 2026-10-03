@@ -2,13 +2,19 @@
 
 import logging
 import subprocess
+import time
 from pathlib import Path
 
 import yt_dlp
 
 from mcptube.config import settings
+from mcptube.ingestion.ffmpeg_errors import ffmpeg_error_tail
 from mcptube.ingestion.platforms import UnsupportedPlatformError, resolve_platform
-from mcptube.ingestion.ytdlp_session import extract_info_with_retry, network_opts
+from mcptube.ingestion.ytdlp_session import (
+    extract_info_with_retry,
+    network_opts,
+    video_stream_opts,
+)
 from mcptube.ingestion.youtube import SAFE_VIDEO_ID_RE
 
 logger = logging.getLogger(__name__)
@@ -18,6 +24,10 @@ class FrameExtractionError(Exception):
     """Raised when frame extraction fails."""
 
 
+class StreamForbiddenError(FrameExtractionError):
+    """Raised when the stream URL answers ffmpeg with HTTP 403."""
+
+
 class FrameExtractor:
     """Extracts individual frames from YouTube videos.
 
@@ -25,6 +35,10 @@ class FrameExtractor:
     YouTube page URLs directly), then ffmpeg to seek and extract
     a single frame. Frames are cached on disk to avoid re-extraction.
     """
+
+    _MAX_RES = 360
+    _ATTEMPTS = 3
+    _RETRY_DELAY_S = 2.0
 
     def extract_frame(self, video_id: str, timestamp: float, source_url: str) -> Path:
         """Extract a single frame at the given timestamp.
@@ -46,11 +60,22 @@ class FrameExtractor:
             logger.info("Frame cache hit: %s", cache_path)
             return cache_path
 
-        # Resolve direct stream URL via yt-dlp
-        stream_url = self._resolve_stream_url(source_url)
-
-        # Extract frame via ffmpeg
-        self._extract_with_ffmpeg(stream_url, timestamp, cache_path)
+        # YouTube intermittently issues stream URLs that only serve the first
+        # minute of the file and answer 403 past it. The restriction belongs to
+        # the issued URL, so resolving again yields a usable one.
+        for attempt in range(1, self._ATTEMPTS + 1):
+            stream_url = self._resolve_stream_url(source_url)
+            try:
+                self._extract_with_ffmpeg(stream_url, timestamp, cache_path)
+                break
+            except StreamForbiddenError:
+                if attempt == self._ATTEMPTS:
+                    raise
+                logger.warning(
+                    "Stream URL rejected with 403 (attempt %d/%d), resolving again",
+                    attempt, self._ATTEMPTS,
+                )
+                time.sleep(self._RETRY_DELAY_S * attempt)
 
         return cache_path
 
@@ -64,8 +89,8 @@ class FrameExtractor:
         ydl_opts = network_opts({
             "quiet": True,
             "no_warnings": True,
-            "format": "best[ext=mp4]/best",
             "skip_download": True,
+            **video_stream_opts(self._MAX_RES),
         })
         try:
             info = extract_info_with_retry(source_url, ydl_opts)
@@ -100,8 +125,9 @@ class FrameExtractor:
                 timeout=30,
             )
             if result.returncode != 0 or not output.exists():
-                raise FrameExtractionError(
-                    f"ffmpeg failed (code {result.returncode}): {result.stderr[:200]}"
+                error = StreamForbiddenError if "403 Forbidden" in result.stderr else FrameExtractionError
+                raise error(
+                    f"ffmpeg failed (code {result.returncode}): {ffmpeg_error_tail(result.stderr)}"
                 )
             logger.info("Frame extracted: %s", output)
         except subprocess.TimeoutExpired:

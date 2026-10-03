@@ -1,6 +1,9 @@
 """Shared fixtures for mcptube tests."""
 
+import copy
+
 import pytest
+import yt_dlp
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -145,3 +148,55 @@ def service(sqlite_repo, mock_extractor, mock_frames, mock_llm, tmp_path):
         llm_client=mock_llm,
         wiki_engine=wiki_engine,
     )
+
+
+def _fmt(format_id, width, height, vcodec, protocol="https", acodec="none", ext="mp4"):
+    return {
+        "format_id": format_id, "url": f"https://cdn.example/{format_id}", "ext": ext,
+        "width": width, "height": height, "vcodec": vcodec, "acodec": acodec, "protocol": protocol,
+    }
+
+
+@pytest.fixture
+def youtube_formats():
+    """Format list shaped like yt-dlp >= 2026.08 returns for YouTube: nothing pre-muxed."""
+    return [
+        _fmt("140", None, None, "none", acodec="mp4a.40.2", ext="m4a"),
+        _fmt("160", 256, 144, "avc1.4d400c"),
+        _fmt("230", 640, 360, "avc1.4D401E", protocol="m3u8_native"),
+        _fmt("134", 640, 360, "avc1.4d401e"),
+        _fmt("396", 640, 360, "av01.0.01M.08"),
+        _fmt("232", 1280, 720, "avc1.4D401F", protocol="m3u8_native"),
+        _fmt("136", 1280, 720, "avc1.4d401f"),
+        _fmt("247", 1280, 720, "vp9", ext="webm"),
+        _fmt("398", 1280, 720, "av01.0.05M.08"),
+        _fmt("137", 1920, 1080, "avc1.640028"),
+        _fmt("401", 3840, 2160, "av01.0.12M.08"),
+    ]
+
+
+@pytest.fixture
+def instagram_formats():
+    """Format list shaped like Instagram's: progressive files of unknown codec + DASH video-only."""
+    return [
+        {"format_id": "1", "url": "https://cdn.example/1", "ext": "mp4"},
+        {"format_id": "3", "url": "https://cdn.example/3", "ext": "mp4"},
+        _fmt("dash-audio", None, None, "none", acodec="mp4a.40.5", ext="m4a"),
+        _fmt("dash-720", 720, 1280, "vp09.00.31.08"),
+        _fmt("dash-1080", 1080, 1920, "vp09.00.40.08"),
+    ]
+
+
+@pytest.fixture
+def select_format():
+    """Run yt-dlp's real format selector, offline, over a canned format list."""
+    def select(formats, opts, **video_fields):
+        info = {
+            "id": "x", "title": "t", "extractor": "test", "extractor_key": "Test",
+            "webpage_url": "https://example.com/x", "formats": copy.deepcopy(formats),
+            **video_fields,
+        }
+        ydl_opts = {"quiet": True, "no_warnings": True, "skip_download": True, **opts}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            return ydl.process_video_result(info, download=False)
+    return select

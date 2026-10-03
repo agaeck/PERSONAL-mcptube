@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yt_dlp
 
 from mcptube.ingestion.frames import FrameExtractionError, FrameExtractor
 
@@ -63,6 +64,63 @@ class TestFrameExtractor:
             with pytest.raises(FrameExtractionError, match="ffmpeg failed"):
                 extractor._extract_with_ffmpeg("https://stream.url", 10.0, output)
 
+    def test_ffmpeg_failure_reports_end_of_stderr(self, tmp_path):
+        stderr = (
+            "ffmpeg version 7.1.5 Copyright (c) the FFmpeg developers\n"
+            + "  configuration: --enable-x\n" * 20
+            + "Error opening input files: Server returned 403 Forbidden (access denied)\n"
+        )
+        mock_result = MagicMock(returncode=8, stderr=stderr)
+        with patch("mcptube.ingestion.frames.subprocess.run", return_value=mock_result):
+            with pytest.raises(FrameExtractionError, match="403 Forbidden"):
+                FrameExtractor()._extract_with_ffmpeg("https://stream.url", 10.0, tmp_path / "out.jpg")
+
+    def _ffmpeg_that_rejects(self, forbidden_urls):
+        """Fake subprocess.run: 403 for the given stream URLs, a written frame otherwise."""
+        def fake_run(cmd, **kwargs):
+            if cmd[cmd.index("-i") + 1] in forbidden_urls:
+                return MagicMock(
+                    returncode=8,
+                    stderr="Error opening input files: Server returned 403 Forbidden (access denied)\n",
+                )
+            Path(cmd[-1]).write_bytes(b"\xff\xd8fake")
+            return MagicMock(returncode=0, stderr="")
+        return fake_run
+
+    @patch("time.sleep")
+    def test_resolves_again_when_stream_is_forbidden(self, _sleep, tmp_path):
+        # YouTube intermittently issues URLs that only serve the start of the file.
+        out = tmp_path / "frame.jpg"
+        with patch.object(FrameExtractor, "_cache_path", return_value=out), \
+             patch.object(FrameExtractor, "_resolve_stream_url", side_effect=["https://s/bad", "https://s/good"]) as resolve, \
+             patch("mcptube.ingestion.frames.subprocess.run", side_effect=self._ffmpeg_that_rejects({"https://s/bad"})):
+            path = FrameExtractor().extract_frame("abc123", 500.0, "https://www.youtube.com/watch?v=abc123")
+
+        assert path == out and out.exists()
+        assert resolve.call_count == 2
+
+    @patch("time.sleep")
+    def test_gives_up_when_every_resolved_stream_is_forbidden(self, _sleep, tmp_path):
+        urls = [f"https://s/bad{i}" for i in range(10)]
+        with patch.object(FrameExtractor, "_cache_path", return_value=tmp_path / "frame.jpg"), \
+             patch.object(FrameExtractor, "_resolve_stream_url", side_effect=urls) as resolve, \
+             patch("mcptube.ingestion.frames.subprocess.run", side_effect=self._ffmpeg_that_rejects(set(urls))):
+            with pytest.raises(FrameExtractionError, match="403 Forbidden"):
+                FrameExtractor().extract_frame("abc123", 500.0, "https://www.youtube.com/watch?v=abc123")
+
+        assert resolve.call_count == 3
+
+    def test_other_ffmpeg_failures_are_not_retried(self, tmp_path):
+        # A new URL cannot fix e.g. a timestamp past the end of the video.
+        failing = MagicMock(returncode=1, stderr="Output file is empty, nothing was encoded\n")
+        with patch.object(FrameExtractor, "_cache_path", return_value=tmp_path / "frame.jpg"), \
+             patch.object(FrameExtractor, "_resolve_stream_url", return_value="https://s/ok") as resolve, \
+             patch("mcptube.ingestion.frames.subprocess.run", return_value=failing):
+            with pytest.raises(FrameExtractionError, match="nothing was encoded"):
+                FrameExtractor().extract_frame("abc123", 9999.0, "https://www.youtube.com/watch?v=abc123")
+
+        assert resolve.call_count == 1
+
     def test_extract_with_ffmpeg_timeout(self, tmp_path):
         extractor = FrameExtractor()
         output = tmp_path / "out.jpg"
@@ -106,6 +164,19 @@ class TestFrameExtractor:
         mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
         FrameExtractor()._resolve_stream_url("https://www.tiktok.com/@u/video/7263")
         assert ydl.extract_info.call_args.args[0] == "https://www.tiktok.com/@u/video/7263"
+
+    def test_resolve_stream_url_without_any_muxed_format(self, monkeypatch, youtube_formats):
+        # yt-dlp >= 2026.08 offers YouTube only as separate video and audio streams.
+        def fake_extract_info(ydl, url, download=False):
+            info = {
+                "id": "abc123", "title": "t", "extractor": "test", "extractor_key": "Test",
+                "webpage_url": url, "formats": youtube_formats,
+            }
+            return ydl.process_video_result(info, download=False)
+
+        monkeypatch.setattr(yt_dlp.YoutubeDL, "extract_info", fake_extract_info)
+        url = FrameExtractor()._resolve_stream_url("https://www.youtube.com/watch?v=abc123")
+        assert url == "https://cdn.example/134"  # 360p h264 over plain https
 
     def test_resolve_stream_url_rejects_unsupported_host(self):
         # Defense-in-depth: source_url is read back from storage, not the original

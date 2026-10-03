@@ -2,13 +2,19 @@
 
 import logging
 import subprocess
+import tempfile
 from pathlib import Path
 
 import yt_dlp
 
 from mcptube.config import settings
+from mcptube.ingestion.ffmpeg_errors import ffmpeg_error_tail
 from mcptube.ingestion.platforms import UnsupportedPlatformError, resolve_platform
-from mcptube.ingestion.ytdlp_session import extract_info_with_retry, network_opts
+from mcptube.ingestion.ytdlp_session import (
+    extract_info_with_retry,
+    network_opts,
+    video_stream_opts,
+)
 from mcptube.ingestion.youtube import SAFE_VIDEO_ID_RE
 
 logger = logging.getLogger(__name__)
@@ -35,6 +41,7 @@ class SceneFrameExtractor:
     _DEFAULT_THRESHOLD = 0.4
     _MAX_FRAMES = 50  # safety cap
     _SCALE_WIDTH = 1280
+    _SOURCE_MAX_RES = 360
 
     def __init__(self, threshold: float | None = None) -> None:
         """Initialize scene frame extractor.
@@ -75,17 +82,19 @@ class SceneFrameExtractor:
             logger.info("Scene frames cache hit: %d frames for %s", len(cached), video_id)
             return cached[:max_frames]
 
-        # Resolve direct stream URL
-        stream_url = self._resolve_stream_url(source_url)
-
-        # Extract frames via ffmpeg scene filter
-        frames = self._extract_with_ffmpeg(stream_url, output_dir, max_frames)
+        # Scene detection decodes the whole video. ffmpeg reads an https input with
+        # one open-ended Range request, which YouTube throttles to ~2x playback
+        # speed; yt-dlp downloads in bounded chunks at full speed. So fetch the
+        # file first and run ffmpeg on the local copy.
+        with tempfile.TemporaryDirectory(prefix="mcptube-scene-") as tmp:
+            video_path = self._download_video(source_url, Path(tmp))
+            frames = self._extract_with_ffmpeg(video_path, output_dir, max_frames)
 
         logger.info("Extracted %d scene-change frames for %s", len(frames), video_id)
         return frames
 
-    def _resolve_stream_url(self, source_url: str) -> str:
-        """Resolve a direct stream URL from the platform's source URL."""
+    def _download_video(self, source_url: str, dest_dir: Path) -> Path:
+        """Download a low-resolution copy of the video into dest_dir."""
         try:
             resolve_platform(source_url)
         except UnsupportedPlatformError as e:
@@ -94,22 +103,29 @@ class SceneFrameExtractor:
         ydl_opts = network_opts({
             "quiet": True,
             "no_warnings": True,
-            "format": "best[ext=mp4]/best",
-            "skip_download": True,
+            # stdout is the JSON-RPC channel under --stdio; keep the progress bar off it.
+            "noprogress": True,
+            "noplaylist": True,
+            # A live stream would keep downloading until the broadcast ends.
+            "match_filter": yt_dlp.utils.match_filter_func("!is_live"),
+            "paths": {"home": str(dest_dir)},
+            "outtmpl": "video.%(ext)s",
+            **video_stream_opts(self._SOURCE_MAX_RES),
         })
         try:
-            info = extract_info_with_retry(source_url, ydl_opts)
+            info = extract_info_with_retry(source_url, ydl_opts, download=True)
         except yt_dlp.utils.DownloadError as e:
-            raise SceneFrameError(f"Failed to resolve stream URL: {e}") from e
+            raise SceneFrameError(f"Failed to download video: {e}") from e
         if info is None:
             raise SceneFrameError(f"yt-dlp returned no info for: {source_url}")
-        stream_url = info.get("url")
-        if not stream_url:
-            raise SceneFrameError(f"No stream URL resolved for: {source_url}")
-        return stream_url
+        downloads = info.get("requested_downloads") or []
+        path = Path(downloads[0]["filepath"]) if downloads else None
+        if path is None or not path.exists():
+            raise SceneFrameError(f"No video file downloaded for: {source_url}")
+        return path
 
     def _extract_with_ffmpeg(
-        self, stream_url: str, output_dir: Path, max_frames: int
+        self, video_path: Path, output_dir: Path, max_frames: int
     ) -> list[dict]:
         """Use ffmpeg scene filter to extract key frames."""
         output_pattern = str(output_dir / "scene_%04d.jpg")
@@ -120,7 +136,7 @@ class SceneFrameExtractor:
         # -frame_pts 1 — write PTS as frame number (for timestamp recovery)
         cmd = [
             "ffmpeg",
-            "-i", stream_url,
+            "-i", str(video_path),
             "-vf", f"select='gt(scene,{self._threshold})',scale={self._SCALE_WIDTH}:-1,showinfo",
             "-vsync", "vfr",
             "-frames:v", str(max_frames),
@@ -141,7 +157,7 @@ class SceneFrameExtractor:
                 # ffmpeg may return non-zero but still produce frames
                 if not any(output_dir.glob("scene_*.jpg")):
                     raise SceneFrameError(
-                        f"ffmpeg failed (code {result.returncode}): {result.stderr[:300]}"
+                        f"ffmpeg failed (code {result.returncode}): {ffmpeg_error_tail(result.stderr)}"
                     )
 
         except subprocess.TimeoutExpired:

@@ -40,6 +40,39 @@ class TestNetworkOpts:
         assert "extractor_args" not in base
 
 
+class TestVideoStreamOpts:
+    """Feeds canned format lists to yt-dlp's real selector (no network)."""
+
+    def test_youtube_without_muxed_formats_picks_https_h264_at_cap(self, select_format, youtube_formats):
+        picked = select_format(youtube_formats, ytdlp_session.video_stream_opts(720))
+        assert picked["format_id"] == "136"
+
+    def test_lower_cap_picks_lower_resolution(self, select_format, youtube_formats):
+        picked = select_format(youtube_formats, ytdlp_session.video_stream_opts(360))
+        assert picked["format_id"] == "134"
+
+    def test_cap_applies_to_smallest_dimension_of_vertical_video(self, select_format, instagram_formats):
+        # 720x1280 must count as 720p; a height filter would wrongly exclude it.
+        picked = select_format(instagram_formats, ytdlp_session.video_stream_opts(720))
+        assert picked["format_id"] == "dash-720"
+
+    def test_low_cap_prefers_file_of_unknown_size_over_ones_above_the_cap(self, select_format, instagram_formats):
+        # Instagram's progressive files carry no dimensions; the old "best" selector
+        # picked them too, and they are what the scene path downloads.
+        picked = select_format(instagram_formats, ytdlp_session.video_stream_opts(360))
+        assert not picked["format_id"].startswith("dash-")
+
+    def test_falls_back_to_hls_when_no_https_format(self, select_format, youtube_formats):
+        hls_only = [f for f in youtube_formats if f["protocol"] == "m3u8_native"]
+        picked = select_format(hls_only, ytdlp_session.video_stream_opts(720))
+        assert picked["format_id"] == "232"
+
+    def test_muxed_only_platform_still_resolves(self, select_format):
+        muxed = [{"format_id": "0", "url": "https://cdn.example/0", "ext": "mp4"}]
+        picked = select_format(muxed, ytdlp_session.video_stream_opts(720))
+        assert picked["url"] == "https://cdn.example/0"
+
+
 class TestExtractInfoWithRetry:
     def _ydl_que_falha_n_vezes(self, mock_cls, n_falhas, info):
         ydl = MagicMock()
@@ -71,3 +104,15 @@ class TestExtractInfoWithRetry:
         info = ytdlp_session.extract_info_with_retry("https://u", {})
         assert info == {"id": "ok"}
         assert ydl.extract_info.call_count == 1
+
+    @patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
+    def test_does_not_download_by_default(self, mock_cls):
+        ydl = self._ydl_que_falha_n_vezes(mock_cls, 0, {"id": "ok"})
+        ytdlp_session.extract_info_with_retry("https://u", {})
+        assert ydl.extract_info.call_args.kwargs["download"] is False
+
+    @patch("mcptube.ingestion.ytdlp_session.yt_dlp.YoutubeDL")
+    def test_download_flag_is_forwarded(self, mock_cls):
+        ydl = self._ydl_que_falha_n_vezes(mock_cls, 0, {"id": "ok"})
+        ytdlp_session.extract_info_with_retry("https://u", {}, download=True)
+        assert ydl.extract_info.call_args.kwargs["download"] is True
